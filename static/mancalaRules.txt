@@ -1,0 +1,8 @@
+mancala rules : mancala is a turn based rules  in which there are 6 pits, filled with 4 stones each and an empty store at the start of each row, and there are two rows.
+in each turn, the player can only pick stones from their row, and only from stones that are in their pits and not in their stores.
+the turns will go as following: the player will pick up the stones from a pit of their choosing(must have at least one stone) and place one stone in every pit that follows the pit they chose in the diraction of their store
+if they passed their store, they will also place stones on the opponent's pits, but not in his store.
+if someone has more than half of the stones  in game already in their store, they won.
+additional rules: 1. if some ended a turn on his own pit- he gets an extra turn
+2. if someone ended their turn on an empty pit, (on their side of the board only) they'll add all the stones on the opponent's opposing pit and the stone they placed on their empty pit
+3. the turns end as soon as the player ran out of stones in their hand(they don't pick up stones if they landed on a full pit)

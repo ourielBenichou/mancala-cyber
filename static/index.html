@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Benichou's Mancala</title>
+    <link rel="icon" href="data:," />
+    <style>
+        :root {
+            --night: #12232e;
+            --night-lit: #25495a;
+            --walnut: #7a4a22;
+            --walnut-dark: #3a210e;
+            --brass: #f0c05a;
+            --bone: #f3e8d2;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+            color: var(--bone);
+            text-align: center;
+            background: radial-gradient(ellipse at 50% -10%, var(--night-lit) 0%, var(--night) 60%, #0a141b 100%) fixed;
+        }
+        h1 {
+            margin: 0;
+            font-family: Georgia, "Palatino Linotype", serif;
+            font-size: clamp(22px, 4vw, 38px);
+            letter-spacing: .5px;
+        }
+
+        /* ---- header: title + whose turn ---- */
+        header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px 16px;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 16px 14px 0;
+        }
+        .tor, .notTurn {
+            border: none;
+            border-radius: 14px;
+            padding: 10px 18px;
+            font: inherit;
+            font-weight: 700;
+            color: #fff;
+        }
+        .tor {
+            background: linear-gradient(135deg, #8a58d4, #4f2fa3);
+            box-shadow: 0 0 20px rgba(138, 88, 212, .75);
+        }
+        .notTurn {
+            background: rgba(255, 255, 255, .12);
+            opacity: .45;
+        }
+        header h1 { order: 2; flex: 1 1 auto; }
+        #100 { order: 1; }
+        #101 { order: 3; }
+
+        main {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 12px;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 14px 12px 40px;
+        }
+        #aa { flex-basis: 100%; }
+
+        /* ---- buttons ---- */
+        .Start, .ghost {
+            padding: 12px 26px;
+            font: inherit;
+            font-weight: 700;
+            border: none;
+            border-radius: 999px;
+            cursor: pointer;
+            color: var(--walnut-dark);
+            background: linear-gradient(#ffd978, var(--brass));
+            box-shadow: 0 4px 0 #b78a1f, 0 8px 16px rgba(0, 0, 0, .4);
+        }
+        .Start:active { transform: translateY(3px); box-shadow: 0 1px 0 #b78a1f, 0 4px 8px rgba(0, 0, 0, .4); }
+        .ghost {
+            color: var(--bone);
+            background: rgba(255, 255, 255, .1);
+            border: 1px solid rgba(255, 255, 255, .28);
+            box-shadow: none;
+        }
+        .welcome { margin: 30px auto 22px; max-width: 460px; line-height: 1.5; font-size: 18px; }
+        .account input {
+            width: min(220px, 70vw);
+            margin: 6px 4px;
+            padding: 10px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, .28);
+            background: rgba(0, 0, 0, .25);
+            color: var(--bone);
+            font: inherit;
+        }
+        .history {
+            list-style: none;
+            padding: 0;
+            margin: 12px auto 0;
+            text-align: left;
+            font-size: 16px;
+        }
+        .history li { padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+
+        /* ---- evaluation bar ---- */
+        .evl {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: min(100%, 520px);
+            margin: 4px auto 0;
+            font-weight: 700;
+        }
+        .evl span:first-child { color: #8fd3f4; }
+        .evl span:last-child { color: #f3a08c; }
+        .evlTrack {
+            flex: 1;
+            height: 14px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #c0472f;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, .55);
+        }
+        .evlFill { height: 100%; background: #3aa6d6; transition: width .4s; }
+        .evl em { font-style: normal; min-width: 48px; color: var(--brass); }
+
+        /* ---- the board ---- */
+        .board {
+            display: grid;
+            grid-template-columns: minmax(56px, 1fr) 6fr minmax(56px, 1fr);
+            gap: 2.2%;
+            width: min(100%, 1000px);
+            margin: 14px auto 0;
+            padding: 2.4%;
+            border-radius: 28px;
+            border: 3px solid var(--walnut-dark);
+            background:
+                repeating-linear-gradient(92deg, rgba(0, 0, 0, .06) 0 3px, rgba(255, 255, 255, .03) 3px 7px),
+                linear-gradient(145deg, var(--walnut), var(--walnut-dark));
+            box-shadow: 0 20px 44px rgba(0, 0, 0, .6), inset 0 2px 0 rgba(255, 255, 255, .2), inset 0 -8px 16px rgba(0, 0, 0, .4);
+        }
+        .pits { display: grid; grid-template-columns: repeat(6, 1fr); gap: clamp(6px, 1.6vw, 18px); }
+        .pit, .store {
+            position: relative;
+            background: radial-gradient(circle at 50% 35%, #24130a 0%, #3a210f 62%, #54321a 100%);
+            box-shadow: inset 0 9px 18px rgba(0, 0, 0, .75), inset 0 -2px 4px rgba(255, 255, 255, .14), 0 1px 0 rgba(255, 255, 255, .18);
+        }
+        .pit { aspect-ratio: 1; border-radius: 50%; transition: transform .12s, box-shadow .12s; }
+        .store { border-radius: 999px; }
+        .pit.playable { cursor: pointer; }
+        .pit.playable:hover, .pit.playable:focus-visible {
+            transform: scale(1.05);
+            outline: none;
+            box-shadow: inset 0 9px 18px rgba(0, 0, 0, .75), 0 0 0 3px var(--brass), 0 0 20px rgba(240, 192, 90, .65);
+        }
+
+        /* ---- glass stones ---- */
+        .stone {
+            position: absolute;
+            width: 24%;
+            aspect-ratio: 1;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-shadow: 0 3px 5px rgba(0, 0, 0, .6), inset 0 -3px 5px rgba(0, 0, 0, .3);
+        }
+        .store .stone { width: 26%; }
+        .s0 { background: radial-gradient(circle at 35% 30%, #fff 0, #f58a92 22%, #d9444f 65%, #8e1f29 100%); }
+        .s1 { background: radial-gradient(circle at 35% 30%, #fff 0, #8fbcf5 22%, #3f7fd8 65%, #1c3f86 100%); }
+        .s2 { background: radial-gradient(circle at 35% 30%, #fff 0, #8fe3bf 22%, #35a878 65%, #17674a 100%); }
+        .s3 { background: radial-gradient(circle at 35% 30%, #fff 0, #fad28a 22%, #f0a02f 65%, #a65f0c 100%); }
+        .s4 { background: radial-gradient(circle at 35% 30%, #fff 0, #c8a8f3 22%, #8a58d4 65%, #4a2a8a 100%); }
+        .s5 { background: radial-gradient(circle at 35% 30%, #fff 0, #8eeaea 22%, #3cc3c7 65%, #167a80 100%); }
+
+        /* ---- stone counts (always shown) ---- */
+        .count {
+            position: absolute;
+            left: 50%;
+            bottom: -5%;
+            transform: translateX(-50%);
+            min-width: 28px;
+            padding: 1px 9px;
+            border-radius: 999px;
+            font-family: Georgia, serif;
+            font-size: clamp(12px, 1.8vw, 17px);
+            color: var(--brass);
+            background: rgba(10, 10, 10, .72);
+            border: 1px solid rgba(255, 255, 255, .22);
+            pointer-events: none;
+        }
+        .store .count { bottom: auto; top: 3%; font-size: clamp(15px, 2.6vw, 24px); }
+
+        /* ---- win / draw message ---- */
+        .Win { display: none; }
+        .Win-H {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            position: fixed;
+            top: 20vh;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            width: min(90vw, 460px);
+            padding: 34px 20px;
+            border: 3px solid var(--brass);
+            border-radius: 24px;
+            cursor: pointer;
+            color: var(--bone);
+            font: inherit;
+            background: linear-gradient(160deg, #5a3317, #2b170a);
+            box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .6), 0 20px 50px rgba(0, 0, 0, .7);
+        }
+        .Win-H strong { font-family: Georgia, serif; font-size: clamp(30px, 7vw, 52px); color: var(--brass); }
+        .Win-H span { font-size: 18px; }
+
+        @media (prefers-reduced-motion: reduce) {
+            * { transition: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <button id="100" class="tor" style="display:none;">Player A's turn</button>
+        <h1>Benichou's Mancala</h1>
+        <button id="101" class="notTurn" style="display:none;">Player B's turn</button>
+    </header>
+
+    <button id="ad" class="Win" onclick="showBoard()"><strong>Draw</strong><span>Click to play again</span></button>
+    <button id="ab" class="Win" onclick="showBoard()"><strong>Player A wins!</strong><span>Click to play again</span></button>
+    <button id="ac" class="Win" onclick="showBoard()"><strong>Player B wins!</strong><span>Click to play again</span></button>
+
+    <main>
+        <div id="aa">
+            <p class="welcome">Sow the stones from one of your pits around the board and fill your store.</p>
+            <button class="Start" onclick="showBoard()">Start game</button>
+            <button class="ghost" onclick="ShowRules()">Rules</button>
+        </div>
+    </main>
+
+    <script src="Mancala_game.js"></script>
+    <script src="online.js"></script>
+</body>
+</html>
