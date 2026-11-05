@@ -3,6 +3,7 @@
 // sends your clicks and shows the board the server sends back.
 
 var socket = null;
+var roomStarted = false;      // true once both players are in the room and a board has arrived
 var token = localStorage.getItem("mancalaToken") || "";
 
 // Opening index.html from the folder has no address of its own, so it uses
@@ -90,6 +91,7 @@ function leaveRoom() {
     var old = socket;
     socket = null;
     online = false;
+    roomStarted = false;
     if (old) old.close();
     myPlayer = 0;
     torA.textContent = "Player A's turn";
@@ -190,6 +192,7 @@ function onServerMessage(event) {
     var msg = JSON.parse(event.data);
     if (msg.type === "joined") {
         online = true;
+        roomStarted = false;
         vsComputer = false;
         myPlayer = msg.you;
         modeBtn.style.display = "none";
@@ -199,6 +202,7 @@ function onServerMessage(event) {
         if (myPlayer === 0) showWaiting(msg.room);
         else showStatus("Joined room " + msg.room);
     } else if (msg.type === "state") {
+        roomStarted = true;
         board = msg.board;
         current = msg.current;
         gameOver = false;
@@ -314,6 +318,22 @@ function postAccount(path, username, password) {
         });
 }
 
+// Log out. If you are in an online room, leave it first, so the room does not
+// stay open on the server with nobody behind it.
+function doLogout() {
+    if (online) {
+        leaveRoom();
+    } else if (socket) {                                // connected but not in a room yet
+        var stale = socket;
+        socket = null;
+        stale.close();
+    }
+    fetch(api("/api/logout"), {method: "POST", headers: authHeaders()});
+    token = "";
+    localStorage.removeItem("mancalaToken");
+    showAccount(null);
+}
+
 function showAccount(info) {
     account.textContent = "";
     if (!info || !info.username) {
@@ -347,10 +367,18 @@ function showAccount(info) {
     out.className = "ghost";
     out.textContent = "Log out";
     out.onclick = function () {
-        fetch(api("/api/logout"), {method: "POST", headers: authHeaders()});
-        token = "";
-        localStorage.removeItem("mancalaToken");
-        showAccount(null);
+        if (online && roomStarted && !gameOver) {          // a real game is being played
+            openModal({
+                title: "Leave the game?",
+                body: "You are in the middle of an online game. Logging out will leave the room and end the game for your opponent.",
+                buttons: [
+                    { label: "Stay", kind: "ghost" },
+                    { label: "Log out and leave", kind: "Start", onClick: doLogout }
+                ]
+            });
+        } else {
+            doLogout();
+        }
     };
     account.appendChild(hello);
     account.appendChild(out);
