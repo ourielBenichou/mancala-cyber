@@ -66,6 +66,12 @@ function showWaiting(roomCode) {
         card.appendChild(copy);
     }
     card.appendChild(after);
+    var leave = document.createElement("button");
+    leave.type = "button";
+    leave.className = "ghost";
+    leave.textContent = "Leave room";
+    leave.onclick = leaveRoom;
+    card.appendChild(leave);
     var rules = document.createElement("button");
     rules.type = "button";
     rules.className = "ghost";
@@ -73,6 +79,26 @@ function showWaiting(roomCode) {
     rules.onclick = ShowRules;
     card.appendChild(rules);
     area.appendChild(card);
+}
+
+// What the start screen looked like before anything replaced it.
+var startScreenHtml = gameDiv.innerHTML;
+
+// Give up on a room nobody joined. Closing the socket makes the server delete the
+// room, so its code is free again. Then the page goes back to its start screen.
+function leaveRoom() {
+    var old = socket;
+    socket = null;
+    online = false;
+    if (old) old.close();
+    myPlayer = 0;
+    torA.textContent = "Player A's turn";
+    torB.textContent = "Player B's turn";
+    torA.style.display = "none";
+    torB.style.display = "none";
+    modeBtn.style.display = "";
+    onlineBtn.style.display = "";
+    gameDiv.innerHTML = startScreenHtml;
 }
 
 // The "Play online" popup: create a new room, or join a friend's room by code.
