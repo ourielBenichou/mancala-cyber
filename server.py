@@ -215,7 +215,7 @@ def bearer_user(authorization: str = Header(default="")):
 
 
 def account_payload(user, token=None):
-    body = {"username": user["username"]}
+    body = {"username": user["username"], "is_owner": bool(user.get("is_owner"))}
     body.update(database.summary(user["id"]))
     if token:
         body["token"] = token
@@ -253,6 +253,93 @@ def api_me(authorization: str = Header(default="")):
     if user is None:
         return JSONResponse({"message": "Log in first"}, status_code=401)
     return account_payload(user)
+
+
+# ---------- owner only ----------
+
+def owner_or_error(authorization):
+    """Returns (owner, None) for the owner, or (None, an error response) for anybody else."""
+    user = bearer_user(authorization)
+    if user is None:
+        return None, JSONResponse({"message": "Log in first"}, status_code=401)
+    if not user.get("is_owner"):
+        return None, JSONResponse({"message": "Owner only"}, status_code=403)
+    return user, None
+
+
+async def kick_user(user_id, text):
+    """Remove a player from any live game. Closing their connection runs the same
+    clean-up as leaving: the other player is told, and the room is deleted."""
+    for room in list(rooms.values()):
+        for seat in (0, 1):
+            socket_ = room["players"][seat]
+            if socket_ is not None and room["user_ids"][seat] == user_id:
+                await send(socket_, {"type": "kicked", "message": text})
+                try:
+                    await socket_.close()
+                except Exception:
+                    pass
+
+
+@app.get("/api/admin/users")
+def api_admin_users(authorization: str = Header(default="")):
+    owner, error = owner_or_error(authorization)
+    if error:
+        return error
+    return {"users": database.list_users()}
+
+
+@app.get("/api/admin/users/{user_id}/games")
+def api_admin_user_games(user_id: int, authorization: str = Header(default="")):
+    owner, error = owner_or_error(authorization)
+    if error:
+        return error
+    target = database.get_user(user_id)
+    if target is None:
+        return JSONResponse({"message": "No such user"}, status_code=404)
+    body = database.summary(user_id)
+    body["username"] = target["username"]
+    return body
+
+
+@app.get("/api/admin/games")
+def api_admin_games(authorization: str = Header(default="")):
+    owner, error = owner_or_error(authorization)
+    if error:
+        return error
+    return {"games": database.recent_games()}
+
+
+@app.post("/api/admin/users/{user_id}/block")
+async def api_admin_block(user_id: int, body: dict, authorization: str = Header(default="")):
+    owner, error = owner_or_error(authorization)
+    if error:
+        return error
+    target = database.get_user(user_id)
+    if target is None:
+        return JSONResponse({"message": "No such user"}, status_code=404)
+    if target["is_owner"]:
+        return JSONResponse({"message": "The owner account cannot be blocked"}, status_code=400)
+    blocked = bool(body.get("blocked"))
+    database.set_blocked(user_id, blocked)
+    if blocked:
+        await kick_user(user_id, "The owner blocked this account.")
+    return {"ok": True}
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def api_admin_delete(user_id: int, authorization: str = Header(default="")):
+    owner, error = owner_or_error(authorization)
+    if error:
+        return error
+    target = database.get_user(user_id)
+    if target is None:
+        return JSONResponse({"message": "No such user"}, status_code=404)
+    if target["is_owner"]:
+        return JSONResponse({"message": "The owner account cannot be deleted"}, status_code=400)
+    await kick_user(user_id, "The owner removed this account.")
+    database.delete_user(user_id)
+    return {"ok": True}
 
 
 def public_host_url():
@@ -462,6 +549,7 @@ atexit.register(stop_public_link)
 
 if __name__ == "__main__":
     database.connect()
+    database.ensure_owner()
     hosted = public_host_url()
     if hosted:
         print("Players open:  %s" % hosted, flush=True)

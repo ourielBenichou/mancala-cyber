@@ -217,6 +217,12 @@ function onServerMessage(event) {
         torB.style.display = "block";
         refresh();
         if (msg.over) loadAccount();
+    } else if (msg.type === "kicked") {                 // the owner blocked or removed this account
+        leaveRoom();
+        token = "";
+        localStorage.removeItem("mancalaToken");
+        showAccount(null);
+        showMessage("Removed from the game", msg.message || "The owner removed you from the game.");
     } else if (msg.type === "left") {
         gameOver = true;
         showStatus("The other player left. Reload the page to start again.");
@@ -334,6 +340,150 @@ function doLogout() {
     showAccount(null);
 }
 
+// ---------- owner panel: see every player, read their history, block, delete ----------
+// The server checks again on every request, so these buttons only work for the owner.
+
+function adminCall(method, path, body) {
+    var options = {method: method, headers: authHeaders()};
+    if (body !== undefined) options.body = JSON.stringify(body);
+    return fetch(api(path), options).then(function (r) {
+        return r.json().then(function (data) { return {ok: r.ok, body: data}; });
+    });
+}
+
+function adminFail(res) {
+    showMessage("Owner panel", (res && res.body && res.body.message) || "Something went wrong.");
+}
+
+function adminNetworkFail() {
+    showMessage("Owner panel", "Could not reach the server.");
+}
+
+function outcomeWord(outcome) {
+    return outcome === "win" ? "Win" : outcome === "loss" ? "Loss" : "Draw";
+}
+
+function openAdmin() {
+    adminCall("GET", "/api/admin/users").then(function (res) {
+        if (!res.ok) { adminFail(res); return; }
+        var users = res.body.users;
+        var table = modalNode("table", null, "adminTable");
+        var head = modalNode("tr");
+        ["Player", "Record (W-L-D)", "Joined", ""].forEach(function (label) {
+            head.appendChild(modalNode("th", label, label === "Joined" ? "joined" : ""));
+        });
+        table.appendChild(head);
+
+        users.forEach(function (user) {
+            var row = modalNode("tr", null, user.blocked ? "isBlocked" : "");
+            var nameCell = modalNode("td", null, "name");
+            nameCell.appendChild(document.createTextNode(user.username));
+            if (user.is_owner) {
+                nameCell.appendChild(document.createTextNode(" "));
+                nameCell.appendChild(modalNode("span", "owner", "badge owner"));
+            }
+            if (user.blocked) {
+                nameCell.appendChild(document.createTextNode(" "));
+                nameCell.appendChild(modalNode("span", "blocked", "badge blocked"));
+            }
+            row.appendChild(nameCell);
+            row.appendChild(modalNode("td", user.wins + " - " + user.losses + " - " + user.draws));
+            row.appendChild(modalNode("td", String(user.joined || "").slice(0, 10), "joined"));
+
+            var actions = modalNode("td", null, "acts");
+            function addButton(label, extraClass, handler) {
+                var button = modalNode("button", label, "ghost mini" + (extraClass ? " " + extraClass : ""));
+                button.type = "button";
+                button.onclick = handler;
+                actions.appendChild(button);
+            }
+            addButton("History", "", function () { openAdminHistory(user); });
+            if (!user.is_owner) {
+                addButton(user.blocked ? "Unblock" : "Block", "", function () {
+                    adminCall("POST", "/api/admin/users/" + user.id + "/block", {blocked: !user.blocked})
+                        .then(function (r) { if (r.ok) openAdmin(); else adminFail(r); }, adminNetworkFail);
+                });
+                addButton("Delete", "danger", function () { confirmDelete(user); });
+            }
+            row.appendChild(actions);
+            table.appendChild(row);
+        });
+
+        var wrap = modalNode("div", null, "tableWrap");
+        wrap.appendChild(table);
+        openModal({
+            title: "Owner panel",
+            wide: true,
+            body: [modalNode("p", users.length + " account" + (users.length === 1 ? "" : "s") + ". Blocking ends a player's logins and stops them from logging in again.", "muted"), wrap],
+            buttons: [
+                { label: "Close", kind: "ghost" },
+                { label: "Refresh", kind: "ghost", onClick: function () { openAdmin(); return false; } },
+                { label: "All recent games", kind: "Start", onClick: function () { openAdminGames(); return false; } }
+            ]
+        });
+    }, adminNetworkFail);
+}
+
+function confirmDelete(user) {
+    openModal({
+        title: "Delete " + user.username + "?",
+        body: [
+            "This removes the account, and every game this player took part in, which also disappears from their opponents' histories.",
+            "It cannot be undone."
+        ],
+        buttons: [
+            { label: "Cancel", kind: "ghost", onClick: function () { openAdmin(); return false; } },
+            { label: "Delete account", kind: "Start", onClick: function () {
+                adminCall("DELETE", "/api/admin/users/" + user.id)
+                    .then(function (r) { if (r.ok) openAdmin(); else adminFail(r); }, adminNetworkFail);
+                return false;
+            } }
+        ]
+    });
+}
+
+function openAdminHistory(user) {
+    adminCall("GET", "/api/admin/users/" + user.id + "/games").then(function (res) {
+        if (!res.ok) { adminFail(res); return; }
+        var info = res.body;
+        var list = modalNode("ul", null, "history");
+        (info.games || []).forEach(function (game) {
+            list.appendChild(modalNode("li", outcomeWord(game.outcome) + " against " + game.opponent + ", " +
+                game.my_score + "-" + game.opp_score + ", " + game.played_at));
+        });
+        if (!info.games || info.games.length === 0) list.appendChild(modalNode("li", "No finished games yet."));
+        openModal({
+            title: "History: " + info.username,
+            body: [modalNode("p", info.wins + " wins, " + info.losses + " losses, " + info.draws + " draws", "muted"), list],
+            buttons: [
+                { label: "Close", kind: "ghost" },
+                { label: "Back to players", kind: "Start", onClick: function () { openAdmin(); return false; } }
+            ]
+        });
+    }, adminNetworkFail);
+}
+
+function openAdminGames() {
+    adminCall("GET", "/api/admin/games").then(function (res) {
+        if (!res.ok) { adminFail(res); return; }
+        var list = modalNode("ul", null, "history");
+        res.body.games.forEach(function (game) {
+            var winner = game.result === "A" ? game.player_a + " won" : game.result === "B" ? game.player_b + " won" : "draw";
+            list.appendChild(modalNode("li", game.player_a + " vs " + game.player_b + ", " +
+                game.score_a + "-" + game.score_b + " (" + winner + "), " + game.played_at));
+        });
+        if (res.body.games.length === 0) list.appendChild(modalNode("li", "No finished games yet."));
+        openModal({
+            title: "All recent games",
+            body: [modalNode("p", "The latest 200 finished games, newest first.", "muted"), list],
+            buttons: [
+                { label: "Close", kind: "ghost" },
+                { label: "Back to players", kind: "Start", onClick: function () { openAdmin(); return false; } }
+            ]
+        });
+    }, adminNetworkFail);
+}
+
 function showAccount(info) {
     account.textContent = "";
     if (!info || !info.username) {
@@ -381,6 +531,13 @@ function showAccount(info) {
         }
     };
     account.appendChild(hello);
+    if (info.is_owner) {                                // only the owner account gets this
+        var panel = document.createElement("button");
+        panel.className = "Start";
+        panel.textContent = "Owner panel";
+        panel.onclick = openAdmin;
+        account.appendChild(panel);
+    }
     account.appendChild(out);
     var list = document.createElement("ul");
     list.className = "history";

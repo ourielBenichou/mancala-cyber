@@ -6,7 +6,10 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    -- 1 = the owner blocked this player: no login, no playing. database.py adds this
+    -- column to older database files that were made before it existed.
+    blocked       INTEGER NOT NULL DEFAULT 0
 );
 
 -- One finished match. result is A, B, or draw.

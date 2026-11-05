@@ -333,6 +333,43 @@
 
         .belowBoard { margin-top: 18px; }
 
+        /* ---- owner panel ---- */
+        .modalCard.wide { width: min(100%, 780px); }
+        .tableWrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+        .adminTable { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .adminTable th {
+            text-align: left;
+            padding: 6px 8px;
+            color: var(--brass);
+            font-weight: 700;
+            border-bottom: 1px solid rgba(255, 255, 255, .28);
+            white-space: nowrap;
+        }
+        .adminTable td {
+            padding: 8px;
+            vertical-align: middle;
+            border-bottom: 1px solid rgba(255, 255, 255, .12);
+        }
+        .adminTable tr.isBlocked td.name { text-decoration: line-through; opacity: .7; }
+        .adminTable .acts { text-align: right; }
+        .adminTable .joined { white-space: nowrap; }
+        @media (max-width: 600px) {
+            .adminTable .joined { display: none; }          /* make room for the buttons on a phone */
+            .adminTable td, .adminTable th { padding: 6px 4px; }
+        }
+        .mini { padding: 5px 12px; font-size: 13px; margin: 2px 0 2px 4px; }
+        .danger { color: #ffb4a4; border-color: rgba(255, 140, 120, .6); }
+        .badge {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            background: rgba(255, 255, 255, .14);
+        }
+        .badge.owner { background: var(--brass); color: var(--walnut-dark); font-weight: 700; }
+        .badge.blocked { background: #c0472f; color: #fff; }
+        .modalBody .muted { color: rgba(243, 232, 210, .7); font-size: 14px; }
+
         /* ---- waiting for the other player ---- */
         .waitCard {
             width: min(100%, 420px);

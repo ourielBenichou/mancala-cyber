@@ -286,9 +286,11 @@ function modalNode(tag, text, cls) {
 // opts.buttons : [{ label, kind: "Start" (gold) | "ghost" (quiet), onClick }]
 //                onClick may return false to keep the dialog open.
 // opts.focus   : element to focus first (default: the first gold button)
+// opts.wide    : true for a wider card (the owner's tables)
 function openModal(opts) {
     modalGen++;
     modalReturnFocus = document.activeElement;
+    modalEl.firstElementChild.classList.toggle("wide", !!opts.wide);     // wide card, for tables
     document.getElementById("modalTitle").textContent = opts.title || "";
 
     var body = document.getElementById("modalBody");

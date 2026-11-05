@@ -1,4 +1,4 @@
-"""Accounts, login sessions, and match history.
+"""Accounts, login sessions, match history, and the owner's controls.
 
 Two places can hold the data:
 
@@ -10,6 +10,10 @@ Two places can hold the data:
 
 Everything else in the project only calls the functions in this file, so it does not
 know or care which one is in use.
+
+The owner account: set OWNER_PASSWORD (and optionally OWNER_USERNAME, default Eliya) in the
+server's environment. The password is read from there and never written in the code, so it
+does not end up on GitHub. Without OWNER_PASSWORD there is no owner and nobody has admin powers.
 """
 import hashlib
 import hmac
@@ -24,6 +28,10 @@ HERE = Path(__file__).parent
 DB_PATH = Path(os.environ.get("MANCALA_DB", str(HERE / "mancala.db")))
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_PG = DATABASE_URL != ""
+
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "Eliya").strip() or "Eliya"
+OWNER_PASSWORD = os.environ.get("OWNER_PASSWORD", "")
+OWNER_ENABLED = OWNER_PASSWORD != ""
 
 if USE_PG:
     import psycopg
@@ -44,7 +52,8 @@ PG_SCHEMA = [
         username      TEXT NOT NULL,
         password_hash TEXT NOT NULL,
         salt          TEXT NOT NULL,
-        created_at    TEXT NOT NULL DEFAULT %s
+        created_at    TEXT NOT NULL DEFAULT %s,
+        blocked       INTEGER NOT NULL DEFAULT 0
     )""" % _NOW,
     # Alex and alex count as the same name, like COLLATE NOCASE does in SQLite.
     "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower ON users (lower(username))",
@@ -62,6 +71,11 @@ PG_SCHEMA = [
         user_id    INTEGER NOT NULL REFERENCES users(id),
         created_at TEXT NOT NULL DEFAULT %s
     )""" % _NOW,
+]
+# For a database that was created before a column existed (CREATE TABLE IF NOT EXISTS
+# does not change a table that is already there).
+PG_MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked INTEGER NOT NULL DEFAULT 0",
 ]
 
 _lock = threading.Lock()
@@ -82,7 +96,7 @@ def connect():
             # no need to keep a transaction open between requests.
             _conn = psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=15,
                                     autocommit=True)
-            for statement in PG_SCHEMA:
+            for statement in PG_SCHEMA + PG_MIGRATIONS:
                 _conn.execute(statement)
             kind = "Postgres (accounts survive restarts)"
         else:
@@ -90,6 +104,9 @@ def connect():
             _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
             _conn.row_factory = sqlite3.Row
             _conn.executescript((HERE / "schema.sql").read_text(encoding="utf-8"))
+            columns = [row[1] for row in _conn.execute("PRAGMA table_info(users)")]
+            if "blocked" not in columns:
+                _conn.execute("ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0")
             _conn.commit()
             kind = "SQLite file %s" % DB_PATH
         if not _announced:
@@ -169,6 +186,51 @@ def _check_password(password):
     return password
 
 
+def is_owner(username):
+    """True only for the owner's username, and only when an owner password is configured."""
+    return OWNER_ENABLED and str(username or "").lower() == OWNER_USERNAME.lower()
+
+
+def _user(row):
+    return {"id": row["id"], "username": row["username"], "is_owner": is_owner(row["username"])}
+
+
+def ensure_owner():
+    """Create the owner account, or reset it to the configured password.
+
+    Runs every time the server starts. If someone already registered the owner's
+    username before the owner password was set, that account is taken over: its
+    password is replaced and its logins are ended."""
+    if not OWNER_ENABLED:
+        print("Owner account: off (set OWNER_PASSWORD to turn it on)", flush=True)
+        return
+    username = _check_username(OWNER_USERNAME)
+    password = _check_password(OWNER_PASSWORD)
+    row = _execute(
+        "SELECT id, password_hash, salt FROM users WHERE lower(username) = lower(?)",
+        (username,), result="one",
+    )
+    if row is None:
+        salt = secrets.token_hex(16)
+        _execute(
+            "INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)",
+            (username, _hash(password, salt), salt), commit=True,
+        )
+        print("Owner account: created '%s'" % username, flush=True)
+        return
+    if not hmac.compare_digest(_hash(password, row["salt"]), row["password_hash"]):
+        salt = secrets.token_hex(16)
+        _execute(
+            "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?",
+            (_hash(password, salt), salt, row["id"]), commit=True,
+        )
+        _execute("DELETE FROM sessions WHERE user_id = ?", (row["id"],), commit=True)
+        print("Owner account: password updated for '%s'" % username, flush=True)
+    else:
+        print("Owner account: ready ('%s')" % username, flush=True)
+    _execute("UPDATE users SET username = ?, blocked = 0 WHERE id = ?", (username, row["id"]), commit=True)
+
+
 def register(username, password):
     username = _check_username(username)
     password = _check_password(password)
@@ -188,11 +250,13 @@ def login(username, password):
     username = _check_username(username)
     password = _check_password(password)
     row = _execute(
-        "SELECT id, password_hash, salt FROM users WHERE lower(username) = lower(?)",
+        "SELECT id, password_hash, salt, blocked FROM users WHERE lower(username) = lower(?)",
         (username,), result="one",
     )
     if row is None or not hmac.compare_digest(_hash(password, row["salt"]), row["password_hash"]):
         raise AuthError("Wrong username or password")
+    if row["blocked"]:                      # said only after the password is right
+        raise AuthError("This account has been blocked")
     return _open_session(row["id"])
 
 
@@ -212,17 +276,17 @@ def user_for_token(token):
     row = _execute(
         """SELECT users.id, users.username
            FROM sessions JOIN users ON users.id = sessions.user_id
-           WHERE sessions.token = ?""",
+           WHERE sessions.token = ? AND users.blocked = 0""",
         (str(token),), result="one",
     )
     if row is None:
         return None
-    return {"id": row["id"], "username": row["username"]}
+    return _user(row)
 
 
 def user_by_id(user_id):
     row = _execute("SELECT id, username FROM users WHERE id = ?", (user_id,), result="one")
-    return {"id": row["id"], "username": row["username"]}
+    return _user(row)
 
 
 def record_game(player_a_id, player_b_id, score_a, score_b):
@@ -276,3 +340,77 @@ def summary(user_id):
             "opp_score": opp_score,
         })
     return {"wins": wins, "losses": losses, "draws": draws, "games": games}
+
+
+# ---------- the owner's controls (server.py checks that the caller is the owner) ----------
+
+def get_user(user_id):
+    row = _execute("SELECT id, username FROM users WHERE id = ?", (user_id,), result="one")
+    return None if row is None else _user(row)
+
+
+def list_users():
+    """Every account, with its record and whether it is blocked."""
+    rows = _execute(
+        """SELECT u.id, u.username, u.created_at, u.blocked,
+                  (SELECT COUNT(*) FROM games g
+                    WHERE (g.player_a_id = u.id AND g.result = 'A')
+                       OR (g.player_b_id = u.id AND g.result = 'B')) AS wins,
+                  (SELECT COUNT(*) FROM games g
+                    WHERE (g.player_a_id = u.id AND g.result = 'B')
+                       OR (g.player_b_id = u.id AND g.result = 'A')) AS losses,
+                  (SELECT COUNT(*) FROM games g
+                    WHERE (g.player_a_id = u.id OR g.player_b_id = u.id)
+                      AND g.result = 'draw') AS draws
+           FROM users u
+           ORDER BY u.id""",
+        result="all",
+    )
+    return [{
+        "id": row["id"],
+        "username": row["username"],
+        "joined": row["created_at"],
+        "blocked": bool(row["blocked"]),
+        "is_owner": is_owner(row["username"]),
+        "wins": int(row["wins"]),
+        "losses": int(row["losses"]),
+        "draws": int(row["draws"]),
+    } for row in rows]
+
+
+def recent_games(limit=200):
+    """The latest finished games between all players, newest first."""
+    rows = _execute(
+        """SELECT games.id, games.played_at, games.score_a, games.score_b, games.result,
+                  a.username AS name_a, b.username AS name_b
+           FROM games
+           JOIN users a ON a.id = games.player_a_id
+           JOIN users b ON b.id = games.player_b_id
+           ORDER BY games.id DESC
+           LIMIT %d""" % int(limit),
+        result="all",
+    )
+    return [{
+        "id": row["id"],
+        "played_at": row["played_at"],
+        "player_a": row["name_a"],
+        "player_b": row["name_b"],
+        "score_a": row["score_a"],
+        "score_b": row["score_b"],
+        "result": row["result"],
+    } for row in rows]
+
+
+def set_blocked(user_id, blocked):
+    """Block or unblock a player. Blocking also ends all of their logins."""
+    _execute("UPDATE users SET blocked = ? WHERE id = ?", (1 if blocked else 0, user_id), commit=True)
+    if blocked:
+        _execute("DELETE FROM sessions WHERE user_id = ?", (user_id,), commit=True)
+
+
+def delete_user(user_id):
+    """Delete an account, its logins, and every game it played (that game also
+    disappears from the other player's history, because it needs both players)."""
+    _execute("DELETE FROM sessions WHERE user_id = ?", (user_id,), commit=True)
+    _execute("DELETE FROM games WHERE player_a_id = ? OR player_b_id = ?", (user_id, user_id), commit=True)
+    _execute("DELETE FROM users WHERE id = ?", (user_id,), commit=True)
