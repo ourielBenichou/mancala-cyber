@@ -267,7 +267,135 @@ var gameDiv = document.getElementById("aa");
 gameDiv.parentNode.insertBefore(modeBtn, gameDiv);
 updateModeButton();
 
-var rules = "";
-function ShowRules() {
+// ---------- dialog: one reusable popup (replaces alert / prompt) ----------
 
+var modalEl = document.getElementById("modal");
+var modalGen = 0;               // changes every time a dialog opens, so a button can tell if its handler opened another one
+var modalReturnFocus = null;
+
+function modalNode(tag, text, cls) {
+    var node = document.createElement(tag);
+    if (text) node.textContent = text;
+    if (cls) node.className = cls;
+    return node;
 }
+
+// opts.title   : heading text
+// opts.body    : a string, a DOM node, or an array of those
+// opts.buttons : [{ label, kind: "Start" (gold) | "ghost" (quiet), onClick }]
+//                onClick may return false to keep the dialog open.
+// opts.focus   : element to focus first (default: the first gold button)
+function openModal(opts) {
+    modalGen++;
+    modalReturnFocus = document.activeElement;
+    document.getElementById("modalTitle").textContent = opts.title || "";
+
+    var body = document.getElementById("modalBody");
+    body.textContent = "";
+    [].concat(opts.body || []).forEach(function (part) {
+        body.appendChild(typeof part === "string" ? modalNode("p", part) : part);
+    });
+
+    var actions = document.getElementById("modalActions");
+    actions.textContent = "";
+    var primary = null;
+    (opts.buttons || [{ label: "OK", kind: "Start" }]).forEach(function (spec) {
+        var button = modalNode("button", spec.label, spec.kind || "ghost");
+        button.type = "button";
+        button.onclick = function () {
+            var gen = modalGen;
+            var result = spec.onClick ? spec.onClick() : undefined;
+            if (result !== false && gen === modalGen) closeModal();
+        };
+        if (!primary && spec.kind === "Start") primary = button;
+        actions.appendChild(button);
+    });
+
+    modalEl.hidden = false;
+    body.parentNode.scrollTop = 0;
+    (opts.focus || primary || document.getElementById("modalX")).focus({ preventScroll: true });
+}
+
+function closeModal() {
+    if (modalEl.hidden) return;
+    modalEl.hidden = true;
+    if (modalReturnFocus && modalReturnFocus.focus && document.body.contains(modalReturnFocus)) {
+        modalReturnFocus.focus();
+    }
+    modalReturnFocus = null;
+}
+
+// Simple message with one OK button.
+function showMessage(title, text) {
+    openModal({ title: title, body: text, buttons: [{ label: "OK", kind: "Start" }] });
+}
+
+document.getElementById("modalX").onclick = closeModal;
+modalEl.addEventListener("mousedown", function (event) {
+    if (event.target === modalEl) closeModal();        // click on the dark area outside the card
+});
+document.addEventListener("keydown", function (event) {
+    if (modalEl.hidden) return;
+    if (event.key === "Escape") { closeModal(); return; }
+    if (event.key !== "Tab") return;                   // keep Tab inside the dialog
+    var items = modalEl.querySelectorAll("button, input");
+    if (items.length === 0) return;
+    var first = items[0], last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+
+// ---------- rules ----------
+
+function ShowRules() {
+    function section(title, tag, items) {
+        var list = modalNode(tag);
+        items.forEach(function (text) { list.appendChild(modalNode("li", text)); });
+        return [modalNode("h3", title), list];
+    }
+
+    var body = [].concat(
+        [modalNode("p", "Two players share 48 stones. Fill your store with more than half of them to win.")],
+        section("The board", "ul", [
+            "Each player has six pits and one store. Player A plays the top row, with the store on the left. Player B plays the bottom row, with the store on the right.",
+            "Every pit starts with 4 stones and both stores start empty. Player A goes first."
+        ]),
+        section("On your turn", "ol", [
+            "Pick one of your own pits that has at least one stone. You can never pick from a store or from your opponent's pits.",
+            "Pick up every stone in that pit and drop them one at a time into the pits that follow, moving toward your own store.",
+            "Your own store counts as a pit, so drop a stone in it when you pass it. If you still have stones, keep going along your opponent's side, but skip their store.",
+            "Your turn ends when your hand is empty. If your last stone lands in a pit that already had stones, you do not pick them up. The turn simply passes."
+        ]),
+        section("Special moves", "ul", [
+            "Extra turn: if your last stone lands in your own store, you play again.",
+            "Capture: if your last stone lands in an empty pit on your own side, you take that stone and every stone in the pit opposite it, and put them all in your store."
+        ]),
+        section("Winning", "ul", [
+            "The first player to hold more than half of the stones in their store (25 or more) wins right away.",
+            "If both stores end on 24, the game is a draw.",
+            "If a player has no stones left in their pits, their turn is skipped and the other player keeps playing."
+        ])
+    );
+
+    var tip = modalNode("div", null, "tip");
+    tip.appendChild(modalNode("strong", "Good to know: "));
+    tip.appendChild(document.createTextNode(
+        "The bar above the board shows who is ahead (blue is Player A, red is Player B). " +
+        "The Opponent button switches between playing a friend on this screen and playing the computer, which plays Player B. " +
+        "\"Play online\" lets you play a friend on another device."));
+    body.push(tip);
+
+    openModal({
+        title: "How to play Mancala",
+        body: body,
+        buttons: [{ label: "Got it", kind: "Start" }]
+    });
+}
+
+// A Rules button that stays on screen all the time (the one inside #aa is wiped
+// as soon as the board is drawn).
+var rulesBtn = document.createElement("button");
+rulesBtn.className = "ghost";
+rulesBtn.textContent = "Rules";
+rulesBtn.onclick = ShowRules;
+gameDiv.parentNode.insertBefore(rulesBtn, gameDiv);

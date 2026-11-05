@@ -225,8 +225,144 @@
         .Win-H strong { font-family: Georgia, serif; font-size: clamp(30px, 7vw, 52px); color: var(--brass); }
         .Win-H span { font-size: 18px; }
 
+        /* ---- dialog (rules, online lobby, messages) ---- */
+        .modalBack {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(4, 10, 14, .72);
+            animation: modalFade .15s ease-out;
+        }
+        .modalBack[hidden] { display: none; }
+        .modalCard {
+            position: relative;
+            width: min(100%, 540px);
+            max-height: 88vh;
+            overflow-y: auto;
+            padding: 26px 24px 22px;
+            text-align: left;
+            border: 3px solid var(--brass);
+            border-radius: 24px;
+            color: var(--bone);
+            background: linear-gradient(160deg, #5a3317, #2b170a);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, .7);
+            animation: modalRise .2s ease-out;
+        }
+        .modalCard h2 {
+            margin: 0 34px 14px 0;
+            font-family: Georgia, "Palatino Linotype", serif;
+            font-size: clamp(22px, 5vw, 30px);
+            color: var(--brass);
+        }
+        .modalX {
+            position: absolute;
+            top: 12px;
+            right: 14px;
+            width: 34px;
+            height: 34px;
+            border: none;
+            border-radius: 50%;
+            font-size: 22px;
+            line-height: 1;
+            cursor: pointer;
+            color: var(--bone);
+            background: rgba(255, 255, 255, .12);
+        }
+        .modalX:hover, .modalX:focus-visible { background: rgba(255, 255, 255, .24); outline: none; }
+        .modalBody { font-size: 16px; line-height: 1.55; }
+        .modalBody p { margin: 0 0 10px; }
+        .modalBody h3 {
+            margin: 16px 0 6px;
+            font-size: 17px;
+            color: var(--brass);
+        }
+        .modalBody ul, .modalBody ol { margin: 0 0 8px; padding-left: 22px; }
+        .modalBody li { margin-bottom: 6px; }
+        .modalBody .tip {
+            margin-top: 14px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 15px;
+            background: rgba(0, 0, 0, .28);
+            border: 1px solid rgba(255, 255, 255, .16);
+        }
+        .modalActions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .modalActions .Start, .modalActions .ghost { padding: 10px 22px; }
+        .modalBody input {
+            width: 100%;
+            margin: 4px 0 2px;
+            padding: 12px 16px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, .28);
+            background: rgba(0, 0, 0, .3);
+            color: var(--bone);
+            font: inherit;
+        }
+        .modalBody input.code {
+            text-align: center;
+            font-family: Georgia, serif;
+            font-size: 26px;
+            letter-spacing: 8px;
+            text-transform: uppercase;
+        }
+        .modalBody .or {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 14px 0;
+            color: rgba(243, 232, 210, .6);
+            font-size: 14px;
+        }
+        .modalBody .or::before, .modalBody .or::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: rgba(255, 255, 255, .2);
+        }
+        .modalBody .sub { margin: 0 0 6px; font-size: 14px; color: rgba(243, 232, 210, .75); }
+
+        /* ---- waiting for the other player ---- */
+        .waitCard {
+            width: min(100%, 420px);
+            margin: 24px auto;
+            padding: 24px 20px;
+            border: 3px solid var(--brass);
+            border-radius: 24px;
+            background: linear-gradient(160deg, #5a3317, #2b170a);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, .5);
+        }
+        .waitCard h2 { margin: 0 0 8px; font-family: Georgia, serif; color: var(--brass); }
+        .waitCard p { margin: 6px 0; }
+        .waitCard .ghost { display: block; margin: 4px auto 12px; padding: 8px 22px; }
+        .waitCode {
+            display: inline-block;
+            margin: 10px 0;
+            padding: 8px 22px;
+            border-radius: 16px;
+            font-family: Georgia, serif;
+            font-size: clamp(34px, 9vw, 52px);
+            letter-spacing: 10px;
+            text-indent: 10px;
+            color: var(--brass);
+            background: rgba(0, 0, 0, .35);
+            border: 1px dashed rgba(240, 192, 90, .6);
+        }
+
+        @keyframes modalFade { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes modalRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
         @media (prefers-reduced-motion: reduce) {
-            * { transition: none !important; }
+            * { transition: none !important; animation: none !important; }
         }
     </style>
 </head>
@@ -245,9 +381,17 @@
         <div id="aa">
             <p class="welcome">Sow the stones from one of your pits around the board and fill your store.</p>
             <button class="Start" onclick="showBoard()">Start game</button>
-            <button class="ghost" onclick="ShowRules()">Rules</button>
         </div>
     </main>
+
+    <div id="modal" class="modalBack" hidden>
+        <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+            <button type="button" class="modalX" id="modalX" aria-label="Close">&times;</button>
+            <h2 id="modalTitle"></h2>
+            <div id="modalBody" class="modalBody"></div>
+            <div id="modalActions" class="modalActions"></div>
+        </div>
+    </div>
 
     <script src="Mancala_game.js"></script>
     <script src="online.js"></script>

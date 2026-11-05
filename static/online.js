@@ -23,17 +23,109 @@ function sendOnline(obj) {
 }
 
 function showStatus(text) {
-    document.getElementById("aa").innerHTML = "<h2>" + text + "</h2>";
+    var area = document.getElementById("aa");
+    area.textContent = "";
+    var card = document.createElement("div");
+    card.className = "waitCard";
+    var heading = document.createElement("h2");
+    heading.textContent = text;
+    card.appendChild(heading);
+    area.appendChild(card);
 }
 
+// Shown to the player who created the room, until the other player joins.
+function showWaiting(roomCode) {
+    var area = document.getElementById("aa");
+    area.textContent = "";
+    var card = document.createElement("div");
+    card.className = "waitCard";
+    var heading = document.createElement("h2");
+    heading.textContent = "Waiting for your opponent";
+    var hint = document.createElement("p");
+    hint.textContent = "Send this room code to your friend:";
+    var codeBox = document.createElement("div");
+    codeBox.className = "waitCode";
+    codeBox.textContent = roomCode;
+    var after = document.createElement("p");
+    after.textContent = "The game starts as soon as they join.";
+    card.appendChild(heading);
+    card.appendChild(hint);
+    card.appendChild(codeBox);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        var copy = document.createElement("button");
+        copy.type = "button";
+        copy.className = "ghost";
+        copy.textContent = "Copy code";
+        copy.onclick = function () {
+            navigator.clipboard.writeText(roomCode).then(function () {
+                copy.textContent = "Copied!";
+            }, function () {
+                copy.textContent = "Copy failed";
+            });
+        };
+        card.appendChild(copy);
+    }
+    card.appendChild(after);
+    area.appendChild(card);
+}
+
+// The "Play online" popup: create a new room, or join a friend's room by code.
 function startOnline() {
-    var url = socketURL();
     if (!token) {
-        alert("Create an account or log in first. Each player needs their own username.");
+        openModal({
+            title: "Log in first",
+            body: "Create an account or log in before playing online. Each player needs their own username, and you can do it in the box at the top of the page.",
+            buttons: [{ label: "OK", kind: "Start" }]
+        });
         return;
     }
-    var code = prompt("Enter a room code to join, or leave empty to create a new room:");
-    if (code === null) return;                        // cancelled
+    openLobby("");
+}
+
+function openLobby(note) {
+    var body = [];
+    body.push(modalNode("p", "Play a friend on another device. One of you creates a room and shares the code, and the other one joins with it."));
+
+    var label = modalNode("p", "Have a code from a friend?", "sub");
+    var input = document.createElement("input");
+    input.className = "code";
+    input.maxLength = 4;
+    input.placeholder = "CODE";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.setAttribute("aria-label", "Room code");
+    input.oninput = function () { input.value = input.value.toUpperCase().replace(/[^A-Z]/g, ""); };
+    body.push(label, input);
+    if (note) body.push(modalNode("p", note, "sub"));
+
+    function join() {
+        var code = input.value.trim();
+        if (code.length === 0) {
+            label.textContent = "Type your friend's room code first.";
+            input.focus();
+            return false;
+        }
+        connectOnline(code);
+    }
+    input.onkeydown = function (event) {
+        if (event.key === "Enter") { event.preventDefault(); document.getElementById("modalActions").lastChild.click(); }
+    };
+
+    openModal({
+        title: "Play online",
+        body: body,
+        buttons: [
+            { label: "Cancel", kind: "ghost" },
+            { label: "Create a new room", kind: "ghost", onClick: function () { connectOnline(""); } },
+            { label: "Join room", kind: "Start", onClick: join }
+        ],
+        focus: input
+    });
+}
+
+// Opens the connection. An empty code asks the server for a brand new room.
+function connectOnline(code) {
+    var url = socketURL();
     if (socket) socket.close();
     var mine = new WebSocket(url);
     socket = mine;
@@ -46,7 +138,15 @@ function startOnline() {
     };
     mine.onmessage = onServerMessage;
     mine.onerror = function () {
-        alert("The server is closed. Double-click start.bat, then try again.");
+        if (socket !== mine || online) return;
+        openModal({
+            title: "Can't reach the game server",
+            body: "The connection failed. If you are running the game on your own computer, start it with start.bat and try again.",
+            buttons: [
+                { label: "Close", kind: "ghost" },
+                { label: "Try again", kind: "Start", onClick: function () { openLobby(""); } }
+            ]
+        });
     };
     mine.onclose = function () {
         if (mine._keep) clearInterval(mine._keep);
@@ -64,9 +164,8 @@ function onServerMessage(event) {
         onlineBtn.style.display = "none";
         torA.textContent = "Player A's turn" + (myPlayer === 0 ? " (you)" : "");
         torB.textContent = "Player B's turn" + (myPlayer === 1 ? " (you)" : "");
-        showStatus(myPlayer === 0
-            ? "Room code: " + msg.room + " - waiting for the other player..."
-            : "Joined room " + msg.room);
+        if (myPlayer === 0) showWaiting(msg.room);
+        else showStatus("Joined room " + msg.room);
     } else if (msg.type === "state") {
         board = msg.board;
         current = msg.current;
@@ -86,7 +185,18 @@ function onServerMessage(event) {
         gameOver = true;
         showStatus("The other player left. Reload the page to start again.");
     } else if (msg.type === "error") {
-        alert(msg.message);
+        if (!online) {                                // could not get into a room
+            openModal({
+                title: "Couldn't join",
+                body: msg.message,
+                buttons: [
+                    { label: "Close", kind: "ghost" },
+                    { label: "Try again", kind: "Start", onClick: function () { openLobby(""); } }
+                ]
+            });
+        } else {
+            showMessage("Can't do that", msg.message);
+        }
     }
 }
 
@@ -155,7 +265,7 @@ function postAccount(path, username, password) {
     }).then(function (r) { return r.json().then(function (body) { return {ok: r.ok, body: body}; }); })
         .then(function (res) {
             if (!res.ok) {
-                alert(res.body.message || "Could not log in");
+                showMessage("Couldn't log in", res.body.message || "Something went wrong. Please try again.");
                 return;
             }
             token = res.body.token;
@@ -163,7 +273,7 @@ function postAccount(path, username, password) {
             showAccount(res.body);
         })
         .catch(function () {
-            alert("The server is closed. Double-click start.bat, then refresh this page.");
+            showMessage("Can't reach the game server", "If you are running the game on your own computer, start it with start.bat and refresh this page.");
         });
 }
 
