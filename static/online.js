@@ -66,6 +66,12 @@ function showWaiting(roomCode) {
         card.appendChild(copy);
     }
     card.appendChild(after);
+    var rules = document.createElement("button");
+    rules.type = "button";
+    rules.className = "ghost";
+    rules.textContent = "Rules";
+    rules.onclick = ShowRules;
+    card.appendChild(rules);
     area.appendChild(card);
 }
 
@@ -226,6 +232,11 @@ function addJoinLine(label, url) {
 function showJoinInfo(tries) {
     fetch(api("/api/info")).then(function (r) { return r.json(); }).then(function (info) {
         joinBox.textContent = "";
+        // On a hosted server (like Render) the address is the page you are already on,
+        // so there is nothing useful to say here.
+        var alreadyHere = info.public && !info.lan && info.public.replace(/\/+$/, "") === location.origin;
+        joinBox.style.display = alreadyHere ? "none" : "";
+        if (alreadyHere) return;
         if (info.public) addJoinLine("Other computers, open: ", info.public);
         if (info.lan) addJoinLine("Same Wi-Fi, open: ", info.lan);
         if (info.note) {
@@ -295,7 +306,7 @@ function showAccount(info) {
         create.textContent = "Create account";
         create.onclick = function () { postAccount("/api/register", user.value, pass.value); };
         var hint = document.createElement("div");
-        hint.textContent = "Log in on both computers. Usernames are unique. Finished games are saved as a win, loss, or draw.";
+        hint.textContent = "Log in to play online and save your results.";
         account.appendChild(user);
         account.appendChild(pass);
         account.appendChild(document.createElement("br"));

@@ -197,7 +197,8 @@ function render() {
         "<div class='evl'><span>A</span><div class='evlTrack'><div class='evlFill' style='width:" + pct +
         "%'></div></div><span>B</span><em>" + evaluation + "</em></div>" +
         "<div class='board'>" + storeHtml("storeA", 0, board[STORE_A]) + pits +
-        storeHtml("storeB", 13, board[STORE_B]) + "</div>";
+        storeHtml("storeB", 13, board[STORE_B]) + "</div>" +
+        "<div class='belowBoard'><button type='button' class='ghost' onclick='ShowRules()'>Rules</button></div>";
 }
 
 function checkGameOver() {
@@ -391,11 +392,3 @@ function ShowRules() {
         buttons: [{ label: "Got it", kind: "Start" }]
     });
 }
-
-// A Rules button that stays on screen all the time (the one inside #aa is wiped
-// as soon as the board is drawn).
-var rulesBtn = document.createElement("button");
-rulesBtn.className = "ghost";
-rulesBtn.textContent = "Rules";
-rulesBtn.onclick = ShowRules;
-gameDiv.parentNode.insertBefore(rulesBtn, gameDiv);
