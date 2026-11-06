@@ -377,7 +377,20 @@ def api_info():
 
 
 # Must come AFTER the /ws and /api/info routes, because it matches every other path.
-app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
+class FreshStaticFiles(StaticFiles):
+    """Same as StaticFiles, but tells the browser to re-check the files on every visit.
+
+    Without this a browser may keep showing an old copy of the page after an update. "no-cache" does
+    not mean "never store": the browser still asks the server, and gets a tiny 'not modified'
+    answer when the file is unchanged."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", FreshStaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
 
 
 def lan_ips():

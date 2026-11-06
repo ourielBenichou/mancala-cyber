@@ -106,6 +106,9 @@
         /* password box with the hold-to-show eye button inside it */
         .passwrap { position: relative; display: inline-block; }
         .passwrap input { padding-right: 44px; }
+        /* hide the browser's own built-in eye (Edge) so only ours shows */
+        .passwrap input::-ms-reveal,
+        .passwrap input::-ms-clear { display: none; }
         .eye {
             position: absolute;
             right: 12px;
