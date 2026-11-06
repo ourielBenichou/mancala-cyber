@@ -25,7 +25,21 @@ import threading
 from pathlib import Path
 
 HERE = Path(__file__).parent
-DB_PATH = Path(os.environ.get("MANCALA_DB", str(HERE / "mancala.db")))
+
+
+def _default_db_path():
+    """Where the local SQLite file lives when MANCALA_DB is not set.
+
+    On Windows it goes in %LOCALAPPDATA%, not in the project folder: that folder is often
+    inside OneDrive, and OneDrive syncing a database file while it is being written can corrupt it.
+    Hosts (Docker sets MANCALA_DB, Render uses Postgres) are not affected by this."""
+    base = os.environ.get("LOCALAPPDATA")
+    if os.name == "nt" and base:
+        return Path(base) / "mancala-cyber" / "mancala.db"
+    return HERE / "mancala.db"
+
+
+DB_PATH = Path(os.environ.get("MANCALA_DB", str(_default_db_path())))
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 USE_PG = DATABASE_URL != ""
 

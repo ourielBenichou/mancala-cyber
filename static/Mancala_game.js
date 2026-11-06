@@ -6,7 +6,6 @@
 // The pit opposite slot p is slot 12 - p.
 // Player 0 = A (top row), Player 1 = B (bottom row). A starts.
 
-var images = ["mancalaBase.jpg", "mancalaCol.jpg"]; // [store picture, pit picture]
 var STORE_A = 13;
 var STORE_B = 6;
 var EVAL_DEPTH = 10;      // search depth for the evaluation bar
