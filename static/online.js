@@ -484,6 +484,37 @@ function openAdminGames() {
     }, adminNetworkFail);
 }
 
+// Put an eye button inside a password box. The password is visible only while the eye is held down.
+function passwordBox(input) {
+    var box = document.createElement("span");
+    box.className = "passwrap";
+    var eye = document.createElement("button");
+    eye.type = "button";                              // so it never submits anything
+    eye.className = "eye";
+    eye.title = "Hold to show the password";
+    eye.setAttribute("aria-label", "Hold to show the password");
+    eye.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>' +
+        '<circle cx="12" cy="12" r="3"/></svg>';
+    function show() { input.type = "text"; eye.classList.add("on"); }
+    function hide() { input.type = "password"; eye.classList.remove("on"); }
+    eye.addEventListener("pointerdown", function (event) {
+        event.preventDefault();                       // keep the cursor in the password box
+        show();
+    });
+    ["pointerup", "pointerleave", "pointercancel", "blur"].forEach(function (name) {
+        eye.addEventListener(name, hide);
+    });
+    eye.addEventListener("contextmenu", function (event) { event.preventDefault(); });
+    eye.addEventListener("keydown", function (event) {          // keyboard users: hold Space or Enter
+        if (event.key === " " || event.key === "Enter") { event.preventDefault(); show(); }
+    });
+    eye.addEventListener("keyup", hide);
+    box.appendChild(input);
+    box.appendChild(eye);
+    return box;
+}
+
 function showAccount(info) {
     account.textContent = "";
     if (!info || !info.username) {
@@ -504,7 +535,7 @@ function showAccount(info) {
         var hint = document.createElement("div");
         hint.textContent = "Log in to play online and save your results.";
         account.appendChild(user);
-        account.appendChild(pass);
+        account.appendChild(passwordBox(pass));
         account.appendChild(document.createElement("br"));
         account.appendChild(login);
         account.appendChild(create);

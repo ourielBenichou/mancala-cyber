@@ -103,6 +103,32 @@
             color: var(--bone);
             font: inherit;
         }
+        /* password box with the hold-to-show eye button inside it */
+        .passwrap { position: relative; display: inline-block; }
+        .passwrap input { padding-right: 44px; }
+        .eye {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--bone);
+            opacity: .7;
+            cursor: pointer;
+            touch-action: none;             /* a long press on a phone must not scroll or select */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .eye:hover, .eye.on { opacity: 1; color: var(--brass); }
+        .eye svg { width: 20px; height: 20px; pointer-events: none; }
         .history {
             list-style: none;
             padding: 0;
