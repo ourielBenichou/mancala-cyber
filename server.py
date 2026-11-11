@@ -464,6 +464,7 @@ def _remember_public_url(line):
 
 
 tunnel_stop = False
+tunnel_started = 0.0     # when the current tunnel process was launched
 
 
 def _public_link_ok():
@@ -483,7 +484,7 @@ def start_public_link():
     that link showed error 1033."""
 
     def launch():
-        global SHARE_NOTE, tunnel_proc, PUBLIC_URL
+        global SHARE_NOTE, tunnel_proc, PUBLIC_URL, tunnel_started
         for _ in range(50):
             try:
                 probe = socket.create_connection(("127.0.0.1", PORT), timeout=0.2)
@@ -498,6 +499,7 @@ def start_public_link():
 
         while not tunnel_stop:
             PUBLIC_URL = None
+            tunnel_started = time.time()
             tunnel_proc = subprocess.Popen(
                 ["ssh", "-p", "443", "-R0:127.0.0.1:%d" % PORT,
                  "-o", "PreferredAuthentications=password",
@@ -527,13 +529,24 @@ def start_public_link():
 
     def watch():
         bad = 0
+        ticks = 0
         while not tunnel_stop:
-            time.sleep(20)
+            time.sleep(5)
+            ticks += 1
+            running = tunnel_proc is not None and tunnel_proc.poll() is None
+            # A tunnel can connect and then hang before it hands out a link. Restart it
+            # instead of waiting forever.
+            if PUBLIC_URL is None and running and time.time() - tunnel_started > 45:
+                print("The public link is taking too long. Trying again...", flush=True)
+                tunnel_proc.terminate()
+                continue
+            if ticks % 4 != 0:                      # the checks below run every 20 seconds
+                continue
             if PUBLIC_URL is None or _public_link_ok():
                 bad = 0
                 continue
             bad += 1
-            if bad >= 2 and tunnel_proc is not None and tunnel_proc.poll() is None:
+            if bad >= 2 and running:
                 print("The public link stopped answering. Reconnecting...", flush=True)
                 tunnel_proc.terminate()
                 bad = 0
