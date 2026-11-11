@@ -12,8 +12,8 @@ var EVAL_DEPTH = 10;      // search depth for the evaluation bar
 // The computer's difficulty. depth = how many moves ahead it looks (see minimax below);
 // mistakes = how often it ignores its search and plays a random pit instead.
 var LEVELS = [
-    { key: "easy",   name: "Easy",   depth: 3,  mistakes: 0.3 },
-    { key: "medium", name: "Medium", depth: 5,  mistakes: 0 },
+    { key: "easy",   name: "Easy",   depth: 4,  mistakes: 0.3 },
+    { key: "medium", name: "Medium", depth: 6,  mistakes: 0 },
     { key: "hard",   name: "Hard",   depth: 10, mistakes: 0 }
 ];
 var levelIndex = 2;       // which level is chosen (starts on Hard)
