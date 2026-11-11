@@ -99,6 +99,7 @@ function leaveRoom() {
     torA.style.display = "none";
     torB.style.display = "none";
     modeBtn.style.display = "";
+    updateModeButton();                           // the label and the difficulty button match the mode again
     onlineBtn.style.display = "";
     gameDiv.innerHTML = startScreenHtml;
 }
@@ -196,6 +197,7 @@ function onServerMessage(event) {
         vsComputer = false;
         myPlayer = msg.you;
         modeBtn.style.display = "none";
+        updateDifficultyButton();                 // hides the difficulty button too
         onlineBtn.style.display = "none";
         torA.textContent = "Player A's turn" + (myPlayer === 0 ? " (you)" : "");
         torB.textContent = "Player B's turn" + (myPlayer === 1 ? " (you)" : "");
@@ -302,6 +304,18 @@ function authHeaders() {
     var headers = {"Content-Type": "application/json"};
     if (token) headers.Authorization = "Bearer " + token;
     return headers;
+}
+
+// Called by Mancala_game.js when a game against the computer ends. The server replays the moves
+// to check them and to work out the score, then adds the game to this player's history.
+function saveComputerGame(level, moves) {
+    if (!token) return;                                 // not logged in: nothing to save
+    fetch(api("/api/computer-game"), {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({level: level, moves: moves})
+    }).then(function (r) { if (r.ok) loadAccount(); })   // refresh the record shown at the top
+        .catch(function () {});                          // a lost connection must not disturb the game
 }
 
 function postAccount(path, username, password) {

@@ -9,8 +9,18 @@
 var STORE_A = 13;
 var STORE_B = 6;
 var EVAL_DEPTH = 10;      // search depth for the evaluation bar
-var AI_DEPTH = 10;        // search depth for the computer player
+// The computer's difficulty. depth = how many moves ahead it looks (see minimax below);
+// mistakes = how often it ignores its search and plays a random pit instead.
+var LEVELS = [
+    { key: "easy",   name: "Easy",   depth: 1,  mistakes: 0.3 },
+    { key: "medium", name: "Medium", depth: 3,  mistakes: 0 },
+    { key: "hard",   name: "Hard",   depth: 10, mistakes: 0 }
+];
+var levelIndex = 2;       // which level is chosen (starts on Hard)
 var vsComputer = false;  // changed by the "Opponent" button; true = computer plays Player B
+var moveLog = [];        // every pit played in the current game, in order (sent to the server to save a game)
+var countable = false;   // true only if this whole game is against the computer, so it can be saved
+var savedGame = false;   // true once this game has been sent to the server
 var online = false;   // true while playing through the server
 var myPlayer = 0;     // 0 = A, 1 = B
 var board = [];
@@ -126,6 +136,16 @@ function bestMove(b, player, depth) {//finds the best move
     return bestPit;//returns the best move
 }
 
+// The computer (Player B) picks its move according to the chosen difficulty.
+function computerMove(b) {
+    var level = LEVELS[levelIndex];
+    var moves = legalMoves(b, 1);
+    if (level.mistakes > 0 && moves.length > 1 && Math.random() < level.mistakes) {
+        return moves[Math.floor(Math.random() * moves.length)];   // a deliberate slip
+    }
+    return bestMove(b, 1, level.depth);
+}
+
 // ---------- UI ----------
 
 function showBoard() {
@@ -133,6 +153,9 @@ function showBoard() {
     board = [4, 4, 4, 4, 4, 4, 0, 4, 4, 4, 4, 4, 4, 0];
     current = 0;
     gameOver = false;
+    moveLog = [];
+    countable = vsComputer;     // a game is only saved if it is played against the computer from the first move
+    savedGame = false;
     draw.className = "Win";
     winA.className = "Win";
     winB.className = "Win";
@@ -219,15 +242,26 @@ function refresh() {
     torA.className = current === 0 ? "tor" : "notTurn";
     torB.className = current === 1 ? "tor" : "notTurn";
     checkGameOver();
+    if (gameOver) saveComputerGameOnce();
+    updateDifficultyButton();
     if (!gameOver && vsComputer && current === 1) {
         setTimeout(function () {
-            if (vsComputer && current === 1 && !gameOver) playMove(bestMove(board, 1, AI_DEPTH));
+            if (vsComputer && current === 1 && !gameOver) playMove(computerMove(board));
         }, 400);
     }
 }
 
+// When a game against the computer ends, send it to the server so it is kept in the history.
+// online.js does the sending (it knows the login); nothing happens if nobody is logged in.
+function saveComputerGameOnce() {
+    if (!countable || online || savedGame) return;
+    savedGame = true;
+    if (typeof saveComputerGame === "function") saveComputerGame(LEVELS[levelIndex].key, moveLog.slice());
+}
+
 function playMove(pit) {
     if (online) { sendOnline({ type: "move", pit: pit }); return; }
+    moveLog.push(pit);
     var r = applyMove(board, current, pit);
     board = r.board;
     current = nextPlayer(board, current, r.extra);
@@ -251,20 +285,51 @@ function updateModeButton() {
     document.getElementById("mode").textContent = vsComputer
         ? "Opponent: Computer (click to play 2 players)"
         : "Opponent: Human (click to play against the computer)";
+    updateDifficultyButton();
 }
 
 function toggleMode() {
     vsComputer = !vsComputer;
+    // Switching in the middle of a game means it was not all against the computer, so it is not saved.
+    countable = (moveLog.length > 0 && !gameOver) ? false : vsComputer;
     updateModeButton();
     if (board.length > 0 && !gameOver) refresh();   // if it is B's turn, the computer moves now
+}
+
+// ---------- difficulty button (only shown while playing the computer) ----------
+
+// While a game that will be saved is being played, the level is locked, so a loss cannot be
+// turned into a win by making the computer weaker half way through.
+function difficultyLocked() {
+    return countable && moveLog.length > 0 && !gameOver;
+}
+
+function updateDifficultyButton() {
+    var locked = difficultyLocked();
+    diffBtn.style.display = (vsComputer && !online) ? "" : "none";
+    diffBtn.disabled = locked;
+    diffBtn.title = locked ? "Start a new game to change the difficulty" : "";
+    diffBtn.textContent = "Difficulty: " + LEVELS[levelIndex].name +
+        (locked ? " (locked during a game)" : " (click to change)");
+}
+
+function changeDifficulty() {
+    if (difficultyLocked()) return;
+    levelIndex = (levelIndex + 1) % LEVELS.length;
+    updateDifficultyButton();
 }
 
 var modeBtn = document.createElement("button");
 modeBtn.id = "mode";
 modeBtn.className = "Start";
 modeBtn.onclick = toggleMode;
+var diffBtn = document.createElement("button");
+diffBtn.id = "difficulty";
+diffBtn.className = "Start";
+diffBtn.onclick = changeDifficulty;
 var gameDiv = document.getElementById("aa");
 gameDiv.parentNode.insertBefore(modeBtn, gameDiv);
+gameDiv.parentNode.insertBefore(diffBtn, gameDiv);
 updateModeButton();
 
 // ---------- dialog: one reusable popup (replaces alert / prompt) ----------
@@ -384,6 +449,7 @@ function ShowRules() {
     tip.appendChild(document.createTextNode(
         "The bar above the board shows who is ahead (blue is Player A, red is Player B). " +
         "The Opponent button switches between playing a friend on this screen and playing the computer, which plays Player B. " +
+        "Against the computer, the Difficulty button picks Easy, Medium or Hard, and if you are logged in the game is saved to your history. " +
         "\"Play online\" lets you play a friend on another device."));
     body.push(tip);
 

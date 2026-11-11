@@ -255,6 +255,41 @@ def api_me(authorization: str = Header(default="")):
     return account_payload(user)
 
 
+# ---------- games against the computer ----------
+# The computer plays in the browser, so the browser reports the game when it ends. The server
+# does not take the browser's word for the score: it replays the moves with the real rules,
+# and only saves a game that followed them and really finished.
+
+last_computer_game = {}     # user id -> moves of the game saved last, so one game is not saved twice
+
+
+@app.post("/api/computer-game")
+def api_computer_game(body: dict, authorization: str = Header(default="")):
+    user = bearer_user(authorization)
+    if user is None:
+        return JSONResponse({"message": "Log in first"}, status_code=401)
+    level = body.get("level")
+    moves = body.get("moves")
+    if (level not in database.COMPUTER_LEVELS or not isinstance(moves, list) or len(moves) > 300
+            or not all(type(pit) is int for pit in moves)):
+        return JSONResponse({"message": "That is not a game"}, status_code=400)
+
+    board, player = START[:], 0                 # the person is A and starts; the computer is B
+    for pit in moves:
+        if is_over(board) or pit not in legal_moves(board, player):
+            return JSONResponse({"message": "That game did not follow the rules"}, status_code=400)
+        board, extra = apply_move(board, player, pit)
+        player = next_player(board, player, extra)
+    if not is_over(board):
+        return JSONResponse({"message": "That game is not finished"}, status_code=400)
+
+    if last_computer_game.get(user["id"]) == moves:
+        return {"saved": False}
+    result = database.record_computer_game(user["id"], level, board[STORE_A], board[STORE_B])
+    last_computer_game[user["id"]] = moves
+    return {"saved": True, "result": result}
+
+
 # ---------- owner only ----------
 
 def owner_or_error(authorization):

@@ -318,6 +318,36 @@ def record_game(player_a_id, player_b_id, score_a, score_b):
     return result
 
 
+# ---------- games against the computer ----------
+# The computer gets one hidden account per difficulty, so a game against it fits the same
+# games table (and shows up in the history as "Computer (Hard)"). Nobody can log in as it:
+# the names contain spaces and brackets, which register and login never accept.
+COMPUTER_LEVELS = {
+    "easy": "Computer (Easy)",
+    "medium": "Computer (Medium)",
+    "hard": "Computer (Hard)",
+}
+
+
+def _computer_id(level):
+    name = COMPUTER_LEVELS[level]
+    row = _execute("SELECT id FROM users WHERE username = ?", (name,), result="one")
+    if row is not None:
+        return row["id"]
+    try:
+        return _execute(
+            "INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)",
+            (name, "no-login", secrets.token_hex(16)), result="id", commit=True,
+        )
+    except INTEGRITY_ERRORS:                       # two games finished at the same moment
+        return _execute("SELECT id FROM users WHERE username = ?", (name,), result="one")["id"]
+
+
+def record_computer_game(user_id, level, player_score, computer_score):
+    """A finished game against the computer. The player is A, the computer is B."""
+    return record_game(user_id, _computer_id(level), player_score, computer_score)
+
+
 def summary(user_id):
     """Wins, losses, draws, and each past game, from this player's point of view."""
     rows = _execute(
@@ -377,8 +407,9 @@ def list_users():
                     WHERE (g.player_a_id = u.id OR g.player_b_id = u.id)
                       AND g.result = 'draw') AS draws
            FROM users u
+           WHERE u.username NOT IN (?, ?, ?)
            ORDER BY u.id""",
-        result="all",
+        tuple(COMPUTER_LEVELS.values()), result="all",
     )
     return [{
         "id": row["id"],
