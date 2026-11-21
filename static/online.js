@@ -329,6 +329,10 @@ function postAccount(path, username, password) {
                 showMessage("Couldn't log in", res.body.message || "Something went wrong. Please try again.");
                 return;
             }
+            if (res.body.pending) {                         // a new account: the owner has to say yes first
+                showMessage("Waiting for approval", res.body.message);
+                return;
+            }
             token = res.body.token;
             localStorage.setItem("mancalaToken", token);
             showAccount(res.body);
@@ -380,7 +384,10 @@ function outcomeWord(outcome) {
 function openAdmin() {
     adminCall("GET", "/api/admin/users").then(function (res) {
         if (!res.ok) { adminFail(res); return; }
-        var users = res.body.users;
+        var users = res.body.users.slice();
+        users.sort(function (a, b) { return (a.approved ? 1 : 0) - (b.approved ? 1 : 0); });   // waiting accounts first (the sort keeps the rest in order)
+        var waiting = users.filter(function (user) { return !user.approved; }).length;
+        loadAccount();                                  // keeps the "waiting" number on the Owner panel button right
         var table = modalNode("table", null, "adminTable");
         var head = modalNode("tr");
         ["Player", "Record (W-L-D)", "Joined", ""].forEach(function (label) {
@@ -400,6 +407,10 @@ function openAdmin() {
                 nameCell.appendChild(document.createTextNode(" "));
                 nameCell.appendChild(modalNode("span", "blocked", "badge blocked"));
             }
+            if (!user.approved) {
+                nameCell.appendChild(document.createTextNode(" "));
+                nameCell.appendChild(modalNode("span", "waiting", "badge pending"));
+            }
             row.appendChild(nameCell);
             row.appendChild(modalNode("td", user.wins + " - " + user.losses + " - " + user.draws));
             row.appendChild(modalNode("td", String(user.joined || "").slice(0, 10), "joined"));
@@ -410,6 +421,16 @@ function openAdmin() {
                 button.type = "button";
                 button.onclick = handler;
                 actions.appendChild(button);
+            }
+            if (!user.approved) {                       // a new account: say yes, or no (no deletes it)
+                addButton("Approve", "", function () {
+                    adminCall("POST", "/api/admin/users/" + user.id + "/approve")
+                        .then(function (r) { if (r.ok) openAdmin(); else adminFail(r); }, adminNetworkFail);
+                });
+                addButton("Reject", "danger", function () { confirmDelete(user); });
+                row.appendChild(actions);
+                table.appendChild(row);
+                return;
             }
             addButton("History", "", function () { openAdminHistory(user); });
             if (!user.is_owner) {
@@ -428,7 +449,9 @@ function openAdmin() {
         openModal({
             title: "Owner panel",
             wide: true,
-            body: [modalNode("p", users.length + " account" + (users.length === 1 ? "" : "s") + ". Blocking ends a player's logins and stops them from logging in again.", "muted"), wrap],
+            body: [modalNode("p", users.length + " account" + (users.length === 1 ? "" : "s") +
+                (waiting ? ", " + waiting + " waiting for your approval (at the top)" : "") +
+                ". Blocking ends a player's logins and stops them from logging in again.", "muted"), wrap],
             buttons: [
                 { label: "Close", kind: "ghost" },
                 { label: "Refresh", kind: "ghost", onClick: function () { openAdmin(); return false; } },
@@ -547,7 +570,7 @@ function showAccount(info) {
         create.textContent = "Create account";
         create.onclick = function () { postAccount("/api/register", user.value, pass.value); };
         var hint = document.createElement("div");
-        hint.textContent = "Log in to play online and save your results.";
+        hint.textContent = "Log in to play online and save your results. A new account can log in once the owner approves it.";
         account.appendChild(user);
         account.appendChild(passwordBox(pass));
         account.appendChild(document.createElement("br"));
@@ -579,7 +602,7 @@ function showAccount(info) {
     if (info.is_owner) {                                // only the owner account gets this
         var panel = document.createElement("button");
         panel.className = "Start";
-        panel.textContent = "Owner panel";
+        panel.textContent = info.waiting_count ? "Owner panel (" + info.waiting_count + " waiting)" : "Owner panel";
         panel.onclick = openAdmin;
         account.appendChild(panel);
     }

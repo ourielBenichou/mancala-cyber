@@ -9,7 +9,10 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     -- 1 = the owner blocked this player: no login, no playing. database.py adds this
     -- column to older database files that were made before it existed.
-    blocked       INTEGER NOT NULL DEFAULT 0
+    blocked       INTEGER NOT NULL DEFAULT 0,
+    -- 0 = a new account waiting for the owner to say yes: it cannot log in yet. Accounts that
+    -- existed before this column was added count as approved, which is why the default is 1.
+    approved      INTEGER NOT NULL DEFAULT 1
 );
 
 -- One finished match. result is A, B, or draw.

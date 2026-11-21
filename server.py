@@ -217,6 +217,8 @@ def bearer_user(authorization: str = Header(default="")):
 def account_payload(user, token=None):
     body = {"username": user["username"], "is_owner": bool(user.get("is_owner"))}
     body.update(database.summary(user["id"]))
+    if user.get("is_owner"):
+        body["waiting_count"] = database.pending_count()      # new accounts waiting for a yes
     if token:
         body["token"] = token
     return body
@@ -228,6 +230,9 @@ def api_register(body: dict):
         token, user = database.register(body.get("username"), body.get("password"))
     except database.AuthError as error:
         return JSONResponse({"message": str(error)}, status_code=400)
+    if token is None:                       # created, but the owner has to approve it first
+        return {"pending": True, "username": user["username"],
+                "message": "Your account was created. The owner has to approve it before you can log in."}
     return account_payload(user, token)
 
 
@@ -343,6 +348,17 @@ def api_admin_games(authorization: str = Header(default="")):
     if error:
         return error
     return {"games": database.recent_games()}
+
+
+@app.post("/api/admin/users/{user_id}/approve")
+def api_admin_approve(user_id: int, authorization: str = Header(default="")):
+    owner, error = owner_or_error(authorization)
+    if error:
+        return error
+    if database.get_user(user_id) is None:
+        return JSONResponse({"message": "No such user"}, status_code=404)
+    database.set_approved(user_id)
+    return {"ok": True}
 
 
 @app.post("/api/admin/users/{user_id}/block")

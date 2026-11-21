@@ -67,7 +67,8 @@ PG_SCHEMA = [
         password_hash TEXT NOT NULL,
         salt          TEXT NOT NULL,
         created_at    TEXT NOT NULL DEFAULT %s,
-        blocked       INTEGER NOT NULL DEFAULT 0
+        blocked       INTEGER NOT NULL DEFAULT 0,
+        approved      INTEGER NOT NULL DEFAULT 1
     )""" % _NOW,
     # Alex and alex count as the same name, like COLLATE NOCASE does in SQLite.
     "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower ON users (lower(username))",
@@ -90,6 +91,8 @@ PG_SCHEMA = [
 # does not change a table that is already there).
 PG_MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked INTEGER NOT NULL DEFAULT 0",
+    # Accounts that existed before approval was added count as approved (the default is 1).
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS approved INTEGER NOT NULL DEFAULT 1",
 ]
 
 _lock = threading.Lock()
@@ -121,6 +124,8 @@ def connect():
             columns = [row[1] for row in _conn.execute("PRAGMA table_info(users)")]
             if "blocked" not in columns:
                 _conn.execute("ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0")
+            if "approved" not in columns:       # older accounts count as approved (the default is 1)
+                _conn.execute("ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1")
             _conn.commit()
             kind = "SQLite file %s" % DB_PATH
         if not _announced:
@@ -216,7 +221,8 @@ def ensure_owner():
     username before the owner password was set, that account is taken over: its
     password is replaced and its logins are ended."""
     if not OWNER_ENABLED:
-        print("Owner account: off (set OWNER_PASSWORD to turn it on)", flush=True)
+        print("Owner account: off (set OWNER_PASSWORD to turn it on; until then new accounts "
+              "are approved automatically)", flush=True)
         return
     username = _check_username(OWNER_USERNAME)
     password = _check_password(OWNER_PASSWORD)
@@ -242,21 +248,30 @@ def ensure_owner():
         print("Owner account: password updated for '%s'" % username, flush=True)
     else:
         print("Owner account: ready ('%s')" % username, flush=True)
-    _execute("UPDATE users SET username = ?, blocked = 0 WHERE id = ?", (username, row["id"]), commit=True)
+    _execute("UPDATE users SET username = ?, blocked = 0, approved = 1 WHERE id = ?",
+             (username, row["id"]), commit=True)
 
 
 def register(username, password):
+    """Create an account. Returns (token, user) when the account can be used straight away,
+    or (None, user) when it has to wait for the owner to approve it first.
+
+    If there is no owner (no OWNER_PASSWORD), nobody could ever approve anything, so the
+    account is approved immediately."""
     username = _check_username(username)
     password = _check_password(password)
     salt = secrets.token_hex(16)
+    approved = 0 if OWNER_ENABLED else 1
     try:
         user_id = _execute(
-            "INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)",
-            (username, _hash(password, salt), salt),
+            "INSERT INTO users (username, password_hash, salt, approved) VALUES (?, ?, ?, ?)",
+            (username, _hash(password, salt), salt, approved),
             result="id", commit=True,
         )
     except INTEGRITY_ERRORS:
         raise AuthError("That username is already taken")
+    if not approved:
+        return None, user_by_id(user_id)
     return _open_session(user_id)
 
 
@@ -264,13 +279,15 @@ def login(username, password):
     username = _check_username(username)
     password = _check_password(password)
     row = _execute(
-        "SELECT id, password_hash, salt, blocked FROM users WHERE lower(username) = lower(?)",
+        "SELECT id, password_hash, salt, blocked, approved FROM users WHERE lower(username) = lower(?)",
         (username,), result="one",
     )
     if row is None or not hmac.compare_digest(_hash(password, row["salt"]), row["password_hash"]):
         raise AuthError("Wrong username or password")
     if row["blocked"]:                      # said only after the password is right
         raise AuthError("This account has been blocked")
+    if not row["approved"]:
+        raise AuthError("Your account is waiting for the owner to approve it. Try again later.")
     return _open_session(row["id"])
 
 
@@ -290,7 +307,7 @@ def user_for_token(token):
     row = _execute(
         """SELECT users.id, users.username
            FROM sessions JOIN users ON users.id = sessions.user_id
-           WHERE sessions.token = ? AND users.blocked = 0""",
+           WHERE sessions.token = ? AND users.blocked = 0 AND users.approved = 1""",
         (str(token),), result="one",
     )
     if row is None:
@@ -396,7 +413,7 @@ def get_user(user_id):
 def list_users():
     """Every account, with its record and whether it is blocked."""
     rows = _execute(
-        """SELECT u.id, u.username, u.created_at, u.blocked,
+        """SELECT u.id, u.username, u.created_at, u.blocked, u.approved,
                   (SELECT COUNT(*) FROM games g
                     WHERE (g.player_a_id = u.id AND g.result = 'A')
                        OR (g.player_b_id = u.id AND g.result = 'B')) AS wins,
@@ -416,6 +433,7 @@ def list_users():
         "username": row["username"],
         "joined": row["created_at"],
         "blocked": bool(row["blocked"]),
+        "approved": bool(row["approved"]),
         "is_owner": is_owner(row["username"]),
         "wins": int(row["wins"]),
         "losses": int(row["losses"]),
@@ -451,6 +469,17 @@ def set_blocked(user_id, blocked):
     _execute("UPDATE users SET blocked = ? WHERE id = ?", (1 if blocked else 0, user_id), commit=True)
     if blocked:
         _execute("DELETE FROM sessions WHERE user_id = ?", (user_id,), commit=True)
+
+
+def set_approved(user_id):
+    """The owner says yes to a new account: from now on it can log in."""
+    _execute("UPDATE users SET approved = 1 WHERE id = ?", (user_id,), commit=True)
+
+
+def pending_count():
+    """How many new accounts are waiting for the owner."""
+    row = _execute("SELECT COUNT(*) AS n FROM users WHERE approved = 0", result="one")
+    return int(row["n"])
 
 
 def delete_user(user_id):
