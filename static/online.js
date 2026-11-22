@@ -92,6 +92,8 @@ function leaveRoom() {
     socket = null;
     online = false;
     roomStarted = false;
+    cancelAnimation();
+    onlineNames = null;
     if (old) old.close();
     myPlayer = 0;
     torA.textContent = "Player A's turn";
@@ -189,6 +191,38 @@ function connectOnline(code) {
     };
 }
 
+// A new board from the server. If it came from a move, the stones are shown travelling first.
+function showState(msg) {
+    var hadBoard = roomStarted && board.length === 14 && !gameOver;     // there is an earlier board to move from
+    roomStarted = true;
+    if (msg.names) {
+        onlineNames = msg.names;
+        torA.textContent = "Player A: " + (msg.names[0] || "") + (myPlayer === 0 ? " (you)" : "");
+        torB.textContent = "Player B: " + (msg.names[1] || "") + (myPlayer === 1 ? " (you)" : "");
+    }
+    torA.style.display = "block";
+    torB.style.display = "block";
+
+    function apply() {
+        board = msg.board;
+        current = msg.current;
+        gameOver = false;
+        draw.className = "Win";                       // hide old result overlays;
+        winA.className = "Win";                       // refresh() shows the right one again
+        winB.className = "Win";
+        refresh();
+        if (msg.over) loadAccount();
+    }
+
+    var last = msg.last;
+    if (last && hadBoard && typeof last.pit === "number" && (last.player === 0 || last.player === 1)) {
+        animateMove(board.slice(), last.player, last.pit, msg.board, apply);
+    } else {
+        lastMove = null;
+        apply();
+    }
+}
+
 function onServerMessage(event) {
     var msg = JSON.parse(event.data);
     if (msg.type === "joined") {
@@ -204,21 +238,7 @@ function onServerMessage(event) {
         if (myPlayer === 0) showWaiting(msg.room);
         else showStatus("Joined room " + msg.room);
     } else if (msg.type === "state") {
-        roomStarted = true;
-        board = msg.board;
-        current = msg.current;
-        gameOver = false;
-        draw.className = "Win";                       // hide old result overlays;
-        winA.className = "Win";                       // refresh() shows the right one again
-        winB.className = "Win";
-        if (msg.names) {
-            torA.textContent = "Player A: " + (msg.names[0] || "") + (myPlayer === 0 ? " (you)" : "");
-            torB.textContent = "Player B: " + (msg.names[1] || "") + (myPlayer === 1 ? " (you)" : "");
-        }
-        torA.style.display = "block";
-        torB.style.display = "block";
-        refresh();
-        if (msg.over) loadAccount();
+        afterAnimation(function () { showState(msg); });      // a board that arrives mid-animation waits its turn
     } else if (msg.type === "kicked") {                 // the owner blocked or removed this account
         leaveRoom();
         token = "";
@@ -226,6 +246,7 @@ function onServerMessage(event) {
         showAccount(null);
         showMessage("Removed from the game", msg.message || "The owner removed you from the game.");
     } else if (msg.type === "left") {
+        cancelAnimation();
         gameOver = true;
         showStatus("The other player left. Reload the page to start again.");
     } else if (msg.type === "error") {
@@ -479,19 +500,167 @@ function confirmDelete(user) {
     });
 }
 
+// ---------- owner panel: reading game history ----------
+
+// The database stores times as UTC text ("2026-11-21 17:35:25"); show them in the owner's own time.
+function parseDbTime(text) {
+    var d = new Date(String(text || "").replace(" ", "T") + "Z");
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function dayLabel(d) {
+    var today = new Date();
+    var yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return "Today";
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+
+function timeLabel(d) {
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function isComputerName(name) {
+    return /^Computer \((Easy|Medium|Hard)\)$/.test(String(name));
+}
+
+function statTile(value, label, kind) {
+    var tile = modalNode("div", null, "stat" + (kind ? " " + kind : ""));
+    tile.appendChild(modalNode("b", String(value)));
+    tile.appendChild(modalNode("span", label));
+    return tile;
+}
+
+// A row of small buttons where exactly one is selected. onPick gets the chosen value.
+function chipRow(label, options, start, onPick) {
+    var row = modalNode("div", null, "chips");
+    row.appendChild(modalNode("span", label, "label"));
+    var buttons = [];
+    options.forEach(function (option) {
+        var button = modalNode("button", option[1], "chip" + (option[0] === start ? " on" : ""));
+        button.type = "button";
+        button.onclick = function () {
+            buttons.forEach(function (b) { b.classList.remove("on"); });
+            button.classList.add("on");
+            onPick(option[0]);
+        };
+        buttons.push(button);
+        row.appendChild(button);
+    });
+    return row;
+}
+
+function tally(games) {
+    var t = { win: 0, loss: 0, draw: 0 };
+    games.forEach(function (game) { t[game.outcome]++; });
+    return t;
+}
+
+function recordText(t) {
+    return t.win + " won, " + t.loss + " lost, " + t.draw + " drawn";
+}
+
+// Adds a "Today" / "Yesterday" / date row whenever the day changes, then calls addRow for the game.
+function addGroupedRows(table, columns, games, getTime, addRow) {
+    var lastDay = null;
+    games.forEach(function (game) {
+        var when = parseDbTime(getTime(game));
+        var day = when ? dayLabel(when) : "Unknown date";
+        if (day !== lastDay) {
+            var header = modalNode("tr", null, "dayRow");
+            var cell = modalNode("td", day);
+            cell.colSpan = columns;
+            header.appendChild(cell);
+            table.appendChild(header);
+            lastDay = day;
+        }
+        addRow(game, when);
+    });
+}
+
 function openAdminHistory(user) {
     adminCall("GET", "/api/admin/users/" + user.id + "/games").then(function (res) {
         if (!res.ok) { adminFail(res); return; }
         var info = res.body;
-        var list = modalNode("ul", null, "history");
-        (info.games || []).forEach(function (game) {
-            list.appendChild(modalNode("li", outcomeWord(game.outcome) + " against " + game.opponent + ", " +
-                game.my_score + "-" + game.opp_score + ", " + game.played_at));
+        var games = info.games || [];                 // newest first
+        var filter = { result: "all", who: "all" };
+
+        var status = user.blocked ? "blocked" : (user.approved === false ? "waiting for approval" : "active");
+        var joined = parseDbTime(user.joined);
+        var intro = modalNode("p", "Joined " + (joined ? joined.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "unknown") +
+            " \u00b7 " + status, "muted");
+
+        var total = games.length;
+        var overall = tally(games);
+        var rate = total ? Math.round(100 * overall.win / total) + "%" : "-";
+        var tiles = modalNode("div", null, "stats");
+        tiles.appendChild(statTile(total, "games"));
+        tiles.appendChild(statTile(overall.win, "wins", "win"));
+        tiles.appendChild(statTile(overall.loss, "losses", "loss"));
+        tiles.appendChild(statTile(overall.draw, "draws"));
+        tiles.appendChild(statTile(rate, "win rate"));
+
+        var vsPc = games.filter(function (g) { return isComputerName(g.opponent); });
+        var vsPeople = games.filter(function (g) { return !isComputerName(g.opponent); });
+        var split = modalNode("div", null, "split");
+        [["Against the computer", vsPc], ["Against players", vsPeople]].forEach(function (part) {
+            var line = modalNode("span");
+            line.appendChild(modalNode("strong", part[0] + " (" + part[1].length + "): "));
+            line.appendChild(document.createTextNode(part[1].length ? recordText(tally(part[1])) : "no games"));
+            split.appendChild(line);
         });
-        if (!info.games || info.games.length === 0) list.appendChild(modalNode("li", "No finished games yet."));
+
+        var holder = modalNode("div");
+        function paint() {
+            var shown = games.filter(function (g) {
+                if (filter.result !== "all" && g.outcome !== filter.result) return false;
+                if (filter.who === "computer" && !isComputerName(g.opponent)) return false;
+                if (filter.who === "players" && isComputerName(g.opponent)) return false;
+                return true;
+            });
+            holder.textContent = "";
+            if (total === 0) {
+                holder.appendChild(modalNode("p", "No finished games yet.", "muted"));
+                return;
+            }
+            holder.appendChild(modalNode("p", "Showing " + shown.length + " of " + total + " games, newest first.", "muted"));
+            if (shown.length === 0) return;
+            var table = modalNode("table", null, "adminTable");
+            var head = modalNode("tr");
+            ["Time", "Opponent", "Result", "Score"].forEach(function (label) { head.appendChild(modalNode("th", label)); });
+            table.appendChild(head);
+            addGroupedRows(table, 4, shown, function (g) { return g.played_at; }, function (game, when) {
+                var row = modalNode("tr");
+                row.appendChild(modalNode("td", when ? timeLabel(when) : String(game.played_at || ""), "time"));
+                var who = modalNode("td");
+                who.appendChild(document.createTextNode(game.opponent));
+                if (isComputerName(game.opponent)) who.appendChild(modalNode("span", "computer", "tag"));
+                row.appendChild(who);
+                var result = modalNode("td");
+                result.appendChild(modalNode("span", outcomeWord(game.outcome), "res " + game.outcome));
+                row.appendChild(result);
+                row.appendChild(modalNode("td", game.my_score + " \u2013 " + game.opp_score, "score"));
+                table.appendChild(row);
+            });
+            var wrap = modalNode("div", null, "tableWrap tall");
+            wrap.appendChild(table);
+            holder.appendChild(wrap);
+        }
+        paint();
+
+        var chips = [];
+        if (total > 0) {
+            chips.push(chipRow("Result:", [["all", "All"], ["win", "Wins"], ["loss", "Losses"], ["draw", "Draws"]], "all",
+                function (value) { filter.result = value; paint(); }));
+            chips.push(chipRow("Against:", [["all", "Everyone"], ["players", "Players"], ["computer", "Computer"]], "all",
+                function (value) { filter.who = value; paint(); }));
+        }
+
         openModal({
             title: "History: " + info.username,
-            body: [modalNode("p", info.wins + " wins, " + info.losses + " losses, " + info.draws + " draws", "muted"), list],
+            wide: true,
+            body: [intro, tiles, split].concat(chips, [holder]),
             buttons: [
                 { label: "Close", kind: "ghost" },
                 { label: "Back to players", kind: "Start", onClick: function () { openAdmin(); return false; } }
@@ -503,20 +672,60 @@ function openAdminHistory(user) {
 function openAdminGames() {
     adminCall("GET", "/api/admin/games").then(function (res) {
         if (!res.ok) { adminFail(res); return; }
-        var list = modalNode("ul", null, "history");
-        res.body.games.forEach(function (game) {
-            var winner = game.result === "A" ? game.player_a + " won" : game.result === "B" ? game.player_b + " won" : "draw";
-            list.appendChild(modalNode("li", game.player_a + " vs " + game.player_b + ", " +
-                game.score_a + "-" + game.score_b + " (" + winner + "), " + game.played_at));
-        });
-        if (res.body.games.length === 0) list.appendChild(modalNode("li", "No finished games yet."));
+        var games = res.body.games;                   // newest first
+        var filter = { text: "", who: "all" };
+
+        var search = document.createElement("input");
+        search.className = "search";
+        search.placeholder = "Search a player name";
+        search.setAttribute("aria-label", "Search a player name");
+        search.oninput = function () { filter.text = search.value.trim().toLowerCase(); paint(); };
+
+        var holder = modalNode("div");
+        function paint() {
+            var shown = games.filter(function (g) {
+                var hasComputer = isComputerName(g.player_a) || isComputerName(g.player_b);
+                if (filter.who === "computer" && !hasComputer) return false;
+                if (filter.who === "players" && hasComputer) return false;
+                if (filter.text && (g.player_a + " " + g.player_b).toLowerCase().indexOf(filter.text) < 0) return false;
+                return true;
+            });
+            holder.textContent = "";
+            if (games.length === 0) {
+                holder.appendChild(modalNode("p", "No finished games yet.", "muted"));
+                return;
+            }
+            holder.appendChild(modalNode("p", "Showing " + shown.length + " of the latest " + games.length + " games, newest first.", "muted"));
+            if (shown.length === 0) return;
+            var table = modalNode("table", null, "adminTable");
+            var head = modalNode("tr");
+            ["Time", "Player A", "Score", "Player B", "Winner"].forEach(function (label) { head.appendChild(modalNode("th", label)); });
+            table.appendChild(head);
+            addGroupedRows(table, 5, shown, function (g) { return g.played_at; }, function (game, when) {
+                var row = modalNode("tr");
+                row.appendChild(modalNode("td", when ? timeLabel(when) : String(game.played_at || ""), "time"));
+                row.appendChild(modalNode("td", game.player_a));
+                row.appendChild(modalNode("td", game.score_a + " \u2013 " + game.score_b, "score"));
+                row.appendChild(modalNode("td", game.player_b));
+                row.appendChild(modalNode("td", game.result === "A" ? game.player_a : game.result === "B" ? game.player_b : "Draw", "winner"));
+                table.appendChild(row);
+            });
+            var wrap = modalNode("div", null, "tableWrap tall");
+            wrap.appendChild(table);
+            holder.appendChild(wrap);
+        }
+        paint();
+
         openModal({
             title: "All recent games",
-            body: [modalNode("p", "The latest 200 finished games, newest first.", "muted"), list],
+            wide: true,
+            body: [search, chipRow("Show:", [["all", "All games"], ["players", "Players only"], ["computer", "With the computer"]], "all",
+                function (value) { filter.who = value; paint(); }), holder],
             buttons: [
                 { label: "Close", kind: "ghost" },
                 { label: "Back to players", kind: "Start", onClick: function () { openAdmin(); return false; } }
-            ]
+            ],
+            focus: search
         });
     }, adminNetworkFail);
 }

@@ -27,6 +27,11 @@ var board = [];
 var current = 0;         // whose turn: 0 = A, 1 = B
 var gameOver = false;
 var evaluation = 0;
+var animating = false;   // true while the stones of a move are being moved on screen
+var animGen = 0;         // changes when an animation is cancelled, so an old one stops by itself
+var pendingAfter = [];   // work waiting for the animation to end (online: the next board from the server)
+var lastMove = null;     // the move that was just played: { from, end, text }, shown under the board
+var onlineNames = null;  // the two players' names, filled in by online.js
 
 var torA = document.getElementById("100");
 var torB = document.getElementById("101");
@@ -150,6 +155,7 @@ function computerMove(b) {
 
 function showBoard() {
     if (online) { sendOnline({ type: "restart" }); return; }   
+    cancelAnimation();
     board = [4, 4, 4, 4, 4, 4, 0, 4, 4, 4, 4, 4, 4, 0];
     current = 0;
     gameOver = false;
@@ -194,33 +200,224 @@ function storeStones(n) {
     return html;
 }
 
-function pitHtml(id, n, playable) {
-    return "<div class='pit" + (playable ? " playable' role='button' tabindex='0" +
+function pitHtml(id, n, playable, mark) {
+    return "<div class='pit" + (mark ? " " + mark : "") + (playable ? " playable' role='button' tabindex='0" +
         "' onkeydown=\"if(event.key==='Enter'||event.key===' ')MoveStones(this)\"" : "'") +
         " id='" + id + "' onclick='MoveStones(this)'>" + pitStones(n) + "<b class='count'>" + n + "</b></div>";
 }
 
-function storeHtml(cls, id, n) {
-    return "<div class='store " + cls + "' id='" + id + "'><b class='count'>" + n + "</b>" + storeStones(n) + "</div>";
+function storeHtml(cls, id, n, mark) {
+    return "<div class='store " + cls + (mark ? " " + mark : "") + "' id='" + id + "'><b class='count'>" + n + "</b>" + storeStones(n) + "</div>";
 }
 
-function render() {
-    var canClick = !gameOver && !(vsComputer && current === 1) && !(online && current !== myPlayer);
+function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+}
+
+// Draws the board. With no arguments it draws the real game. The animation passes in a board that
+// is half way through a move, plus marks: { src: slot, drop: slot, cap: [slots] }.
+function render(shownBoard, marks) {
+    var bd = shownBoard || board;
+    marks = marks || {};
+    var canClick = !animating && !gameOver && !(vsComputer && current === 1) && !(online && current !== myPlayer);
+    function markFor(slot) {                        // the CSS classes that tint one pit or store
+        var names = [];
+        if (marks.src === slot) names.push("src");
+        if (marks.drop === slot) names.push("drop");
+        if (marks.cap && marks.cap.indexOf(slot) >= 0) names.push("cap");
+        if (!animating && lastMove) {               // where the last move started and ended
+            if (lastMove.from === slot) names.push("lastFrom");
+            if (lastMove.end === slot) names.push("lastTo");
+        }
+        return names.join(" ");
+    }
     var pits = "<div class='pits'>";
     for (var c = 1; c <= 6; c++) {                                        // top row: ids 1..6 -> slots 12..7
-        pits += pitHtml(c, board[13 - c], canClick && current === 0 && board[13 - c] > 0);
+        pits += pitHtml(c, bd[13 - c], canClick && current === 0 && bd[13 - c] > 0, markFor(13 - c));
     }
     for (var d = 0; d < 6; d++) {                                         // bottom row: ids 7..12 -> slots 0..5
-        pits += pitHtml(7 + d, board[d], canClick && current === 1 && board[d] > 0);
+        pits += pitHtml(7 + d, bd[d], canClick && current === 1 && bd[d] > 0, markFor(d));
     }
     pits += "</div>";
     var pct = 50 + 50 * Math.max(-24, Math.min(24, evaluation)) / 24;     // A's share of the evaluation bar
+    var note = (lastMove && !animating) ? escapeHtml(lastMove.text) : "&nbsp;";
     document.getElementById("aa").innerHTML =
         "<div class='evl'><span>A</span><div class='evlTrack'><div class='evlFill' style='width:" + pct +
         "%'></div></div><span>B</span><em>" + evaluation + "</em></div>" +
-        "<div class='board'>" + storeHtml("storeA", 0, board[STORE_A]) + pits +
-        storeHtml("storeB", 13, board[STORE_B]) + "</div>" +
+        "<div class='board'>" + storeHtml("storeA", 0, bd[STORE_A], markFor(STORE_A)) + pits +
+        storeHtml("storeB", 13, bd[STORE_B], markFor(STORE_B)) + "</div>" +
+        "<div class='moveNote'>" + note + "</div>" +
         "<div class='belowBoard'><button type='button' class='ghost' onclick='ShowRules()'>Rules</button></div>";
+}
+
+// ---------- animation: show every stone of a move travelling, so you can follow what happened ----------
+
+// The same sowing as applyMove, but it also reports the order the stones land in.
+// Returns { taken, drops, end, extra, capture } where drops is the list of slots, one per stone.
+function sowSteps(b, player, pit) {
+    var myStore = player === 0 ? STORE_A : STORE_B;
+    var oppStore = player === 0 ? STORE_B : STORE_A;
+    var nb = b.slice();
+    var taken = nb[pit], stones = taken, pos = pit, drops = [];
+    nb[pit] = 0;
+    while (stones > 0) {
+        pos = (pos + 1) % 14;
+        if (pos === oppStore) continue;
+        nb[pos]++;
+        drops.push(pos);
+        stones--;
+    }
+    var extra = pos === myStore, capture = null;
+    if (!extra) {
+        var ownPit = player === 0 ? (pos >= 7 && pos <= 12) : (pos >= 0 && pos <= 5);
+        if (ownPit && nb[pos] === 1) capture = { pit: pos, opp: 12 - pos, count: nb[12 - pos] + 1 };
+    }
+    return { taken: taken, drops: drops, end: pos, extra: extra, capture: capture };
+}
+
+function slotElementId(slot) {                       // which html id belongs to a board slot
+    if (slot === STORE_A) return 0;
+    if (slot === STORE_B) return 13;
+    return slot >= 7 ? 13 - slot : 7 + slot;
+}
+
+function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+}
+
+function moverLabel(player) {
+    if (online) return player === myPlayer ? "You" : ((onlineNames && onlineNames[player]) || "Your opponent");
+    if (vsComputer) return player === 1 ? "Computer" : "You";
+    return player === 0 ? "Player A" : "Player B";
+}
+
+function describeMove(player, pit, seq) {            // the sentence shown under the board
+    var who = moverLabel(player);
+    var column = pit >= 7 ? 13 - pit : pit + 1;      // counted from the left, in either row
+    var text = who + " played column " + column + " (" + seq.taken + (seq.taken === 1 ? " stone)" : " stones)");
+    if (seq.extra) text += " and " + (who === "You" ? "get" : "gets") + " another turn";
+    else if (seq.capture) text += " and captured " + seq.capture.count + (seq.capture.count === 1 ? " stone" : " stones");
+    return text + ".";
+}
+
+function cancelAnimation() {
+    animGen++;
+    animating = false;
+    pendingAfter = [];
+    lastMove = null;
+}
+
+// Run something once no animation is playing (online: the next board has to wait for the one on screen).
+function afterAnimation(work) {
+    if (animating) pendingAfter.push(work); else work();
+}
+
+function runPending() {
+    while (!animating && pendingAfter.length > 0) pendingAfter.shift()();
+}
+
+function showCallout(text) {                         // a short message that pops up over the board
+    var boardEl = document.querySelector("#aa .board");
+    if (!boardEl) return;
+    var tag = document.createElement("div");
+    tag.className = "callout";
+    tag.textContent = text;
+    boardEl.appendChild(tag);
+    setTimeout(function () { if (tag.parentNode) tag.parentNode.removeChild(tag); }, 1500);
+}
+
+// One stone flies from one pit to the next. The little number is how many are still in the hand.
+function flyStone(fromSlot, toSlot, count, ms, colorClass, then) {
+    var boardEl = document.querySelector("#aa .board");
+    var a = document.getElementById(slotElementId(fromSlot));
+    var b = document.getElementById(slotElementId(toSlot));
+    if (!boardEl || !a || !b || !boardEl.animate) { setTimeout(then, ms); return; }
+    var box = boardEl.getBoundingClientRect(), ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    var size = Math.max(20, Math.min(ra.width, ra.height) * 0.3);
+    var x0 = ra.left + ra.width / 2 - box.left - size / 2, y0 = ra.top + ra.height / 2 - box.top - size / 2;
+    var x1 = rb.left + rb.width / 2 - box.left - size / 2, y1 = rb.top + rb.height / 2 - box.top - size / 2;
+    var lift = Math.min(46, Math.hypot(x1 - x0, y1 - y0) * 0.3);
+    var stone = document.createElement("i");
+    stone.className = "flyStone " + colorClass;
+    stone.style.width = stone.style.height = size + "px";
+    stone.innerHTML = "<b>" + count + "</b>";
+    boardEl.appendChild(stone);
+    var finished = false;
+    function end() {
+        if (finished) return;
+        finished = true;
+        if (stone.parentNode) stone.parentNode.removeChild(stone);
+        then();
+    }
+    var motion = stone.animate([
+        { transform: "translate(" + x0 + "px," + y0 + "px) scale(1)" },
+        { transform: "translate(" + (x0 + x1) / 2 + "px," + ((y0 + y1) / 2 - lift) + "px) scale(1.4)", offset: 0.5 },
+        { transform: "translate(" + x1 + "px," + y1 + "px) scale(1)" }
+    ], { duration: ms, easing: "ease-in-out", fill: "forwards" });
+    motion.onfinish = end;
+    setTimeout(end, ms + 150);                       // safety net in case the browser never reports "finished"
+}
+
+// Plays one move on screen, then calls done(), which should store the real new board.
+// before/after are the boards before and after the move. If something does not add up, or the
+// person asked their device for less motion, the move simply happens at once.
+function animateMove(before, player, pit, after, done) {
+    var seq = sowSteps(before, player, pit);
+    var consistent = JSON.stringify(applyMove(before, player, pit).board) === JSON.stringify(after);
+    var gen = ++animGen;
+    lastMove = null;
+
+    function finish() {
+        if (gen !== animGen) return;
+        animating = false;
+        lastMove = { from: pit, end: seq.end, text: describeMove(player, pit, seq) };
+        done();
+        if (seq.extra) showCallout("Extra turn!");
+        else if (seq.capture) showCallout("Capture! +" + seq.capture.count);
+        runPending();
+    }
+    if (!consistent || reducedMotion() || seq.drops.length === 0) { animating = false; finish(); return; }
+
+    animating = true;
+    var color = player === 0 ? "s1" : "s0";          // blue for A, red for B, like the evaluation bar
+    var shown = before.slice();
+    shown[pit] = 0;
+    var inHand = seq.taken, from = pit, i = 0;
+    var perStone = Math.max(110, Math.min(230, 1700 / seq.drops.length));
+    render(shown, { src: pit });                     // the picked up pit empties first
+
+    function next() {
+        if (gen !== animGen) return;
+        if (i >= seq.drops.length) { settle(); return; }
+        var to = seq.drops[i];
+        flyStone(from, to, inHand, perStone, color, function () {
+            if (gen !== animGen) return;
+            shown[to]++;
+            inHand--;
+            i++;
+            from = to;
+            render(shown, { drop: to });
+            setTimeout(next, 30);
+        });
+    }
+
+    function settle() {                              // the last stone has landed
+        if (!seq.capture) { setTimeout(finish, 260); return; }
+        var cap = seq.capture, myStore = player === 0 ? STORE_A : STORE_B;
+        render(shown, { cap: [cap.pit, cap.opp] });  // both pits flash, then everything goes to the store
+        setTimeout(function () {
+            if (gen !== animGen) return;
+            flyStone(cap.opp, myStore, cap.count, 420, color, function () {
+                if (gen !== animGen) return;
+                render(after, { drop: myStore });
+                setTimeout(finish, 260);
+            });
+        }, 520);
+    }
+
+    setTimeout(next, 280);
 }
 
 function checkGameOver() {
@@ -246,8 +443,8 @@ function refresh() {
     updateDifficultyButton();
     if (!gameOver && vsComputer && current === 1) {
         setTimeout(function () {
-            if (vsComputer && current === 1 && !gameOver) playMove(computerMove(board));
-        }, 400);
+            if (vsComputer && current === 1 && !gameOver && !animating) playMove(computerMove(board));
+        }, 600);
     }
 }
 
@@ -261,15 +458,19 @@ function saveComputerGameOnce() {
 
 function playMove(pit) {
     if (online) { sendOnline({ type: "move", pit: pit }); return; }
+    if (animating) return;
     moveLog.push(pit);
-    var r = applyMove(board, current, pit);
-    board = r.board;
-    current = nextPlayer(board, current, r.extra);
-    refresh();
+    var player = current;
+    var r = applyMove(board, player, pit);
+    animateMove(board, player, pit, r.board, function () {     // shows the stones moving, then:
+        board = r.board;
+        current = nextPlayer(board, player, r.extra);
+        refresh();
+    });
 }
 
 function MoveStones(moved) {
-    if (gameOver) return;
+    if (gameOver || animating) return;
     if (vsComputer && current === 1) return;
     if (online && current !== myPlayer) return;
     var id = Number(moved.id);
@@ -293,7 +494,8 @@ function toggleMode() {
     // Switching in the middle of a game means it was not all against the computer, so it is not saved.
     countable = (moveLog.length > 0 && !gameOver) ? false : vsComputer;
     updateModeButton();
-    if (board.length > 0 && !gameOver) refresh();   // if it is B's turn, the computer moves now
+    // If it is B's turn, the computer moves now. (During an animation, refresh() runs when it ends.)
+    if (board.length > 0 && !gameOver && !animating) refresh();
 }
 
 // ---------- difficulty button (only shown while playing the computer) ----------

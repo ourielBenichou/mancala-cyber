@@ -52,7 +52,9 @@
         .tor {
             background: linear-gradient(135deg, #8a58d4, #4f2fa3);
             box-shadow: 0 0 20px rgba(138, 88, 212, .75);
+            animation: turnGlow 1.4s ease-in-out infinite alternate;
         }
+        .notTurn { transition: opacity .3s; }
         .notTurn {
             background: rgba(255, 255, 255, .12);
             opacity: .45;
@@ -85,6 +87,9 @@
             background: linear-gradient(#ffd978, var(--brass));
             box-shadow: 0 4px 0 #b78a1f, 0 8px 16px rgba(0, 0, 0, .4);
         }
+        .Start, .ghost { transition: transform .12s, filter .12s, box-shadow .12s, background .2s; }
+        .Start:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.07); }
+        .ghost:hover:not(:disabled) { background: rgba(255, 255, 255, .18); }
         .Start:disabled, .ghost:disabled { opacity: .55; cursor: not-allowed; }
         .Start:active { transform: translateY(3px); box-shadow: 0 1px 0 #b78a1f, 0 4px 8px rgba(0, 0, 0, .4); }
         .ghost {
@@ -251,6 +256,7 @@
             font: inherit;
             background: linear-gradient(160deg, #5a3317, #2b170a);
             box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .6), 0 20px 50px rgba(0, 0, 0, .7);
+            animation: winPop .5s cubic-bezier(.2, 1.4, .4, 1);
         }
         .Win-H strong { font-family: Georgia, serif; font-size: clamp(30px, 7vw, 52px); color: var(--brass); }
         .Win-H span { font-size: 18px; }
@@ -361,7 +367,85 @@
         }
         .modalBody .sub { margin: 0 0 6px; font-size: 14px; color: rgba(243, 232, 210, .75); }
 
-        .belowBoard { margin-top: 18px; }
+        .belowBoard { margin-top: 12px; }
+
+        /* ---- move animation: follow the stones ---- */
+        .board { position: relative; }
+        .flyStone {
+            position: absolute;
+            left: 0;
+            top: 0;
+            z-index: 5;
+            border-radius: 50%;
+            pointer-events: none;
+            will-change: transform;
+            box-shadow: 0 8px 14px rgba(0, 0, 0, .55), 0 0 16px rgba(255, 255, 255, .6);
+        }
+        .flyStone b {
+            position: absolute;
+            left: 50%;
+            top: -1.7em;
+            transform: translateX(-50%);
+            padding: 0 7px;
+            border-radius: 999px;
+            font: 700 13px Georgia, serif;
+            color: #fff;
+            background: rgba(0, 0, 0, .78);
+            border: 1px solid rgba(255, 255, 255, .35);
+        }
+        .pit.src, .store.src {
+            box-shadow: inset 0 9px 18px rgba(0, 0, 0, .75), 0 0 0 3px rgba(240, 192, 90, .95), 0 0 22px rgba(240, 192, 90, .8);
+        }
+        .pit.drop, .store.drop { animation: dropPulse .35s ease-out; }
+        .pit.cap { animation: capFlash .5s ease-in-out 1; }
+        .pit.lastFrom, .store.lastFrom { outline: 2px dashed rgba(240, 192, 90, .75); outline-offset: 3px; }
+        .pit.lastTo, .store.lastTo { outline: 3px solid rgba(240, 192, 90, .95); outline-offset: 3px; }
+        .moveNote {
+            min-height: 1.5em;
+            margin-top: 12px;
+            font-size: 16px;
+            color: var(--bone);
+            animation: noteIn .35s ease-out;
+        }
+        .callout {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            z-index: 6;
+            padding: 10px 26px;
+            border-radius: 999px;
+            font: 700 clamp(18px, 3.4vw, 30px) Georgia, serif;
+            white-space: nowrap;
+            pointer-events: none;
+            color: var(--walnut-dark);
+            background: linear-gradient(#ffd978, var(--brass));
+            box-shadow: 0 8px 22px rgba(0, 0, 0, .55), 0 0 26px rgba(240, 192, 90, .8);
+            animation: calloutPop 1.4s ease-out forwards;
+        }
+        @keyframes dropPulse {
+            0% { transform: scale(1.14); box-shadow: inset 0 9px 18px rgba(0, 0, 0, .75), 0 0 0 4px rgba(255, 255, 255, .9), 0 0 24px rgba(255, 255, 255, .8); }
+            100% { transform: scale(1); }
+        }
+        @keyframes capFlash {
+            0%, 100% { box-shadow: inset 0 9px 18px rgba(0, 0, 0, .75); }
+            50% { transform: scale(1.1); box-shadow: inset 0 9px 18px rgba(0, 0, 0, .55), 0 0 0 4px #ff7a5c, 0 0 28px #ff7a5c; }
+        }
+        @keyframes calloutPop {
+            0% { opacity: 0; transform: translate(-50%, -20%) scale(.6); }
+            14% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+            24% { transform: translate(-50%, -50%) scale(1); }
+            78% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -90%) scale(1); }
+        }
+        @keyframes noteIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        @keyframes turnGlow {
+            from { box-shadow: 0 0 12px rgba(138, 88, 212, .55); }
+            to { box-shadow: 0 0 26px rgba(176, 130, 255, .95); }
+        }
+        @keyframes winPop {
+            from { opacity: 0; transform: translateX(-50%) translateY(24px) scale(.82); }
+            to { opacity: 1; transform: translateX(-50%); }
+        }
 
         /* ---- owner panel ---- */
         .modalCard.wide { width: min(100%, 780px); }
@@ -400,6 +484,55 @@
         .badge.blocked { background: #c0472f; color: #fff; }
         .badge.pending { background: #e8c25a; color: var(--walnut-dark); font-weight: 700; }
         .modalBody .muted { color: rgba(243, 232, 210, .7); font-size: 14px; }
+
+        /* ---- owner panel: a player's game history ---- */
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); gap: 8px; margin: 10px 0; }
+        .stat {
+            padding: 8px 6px;
+            text-align: center;
+            border-radius: 12px;
+            background: rgba(0, 0, 0, .28);
+            border: 1px solid rgba(255, 255, 255, .14);
+        }
+        .stat b { display: block; font: 700 22px Georgia, serif; color: var(--brass); }
+        .stat.win b { color: #6fdca8; }
+        .stat.loss b { color: #ff9a82; }
+        .stat span { font-size: 12px; color: rgba(243, 232, 210, .75); }
+        .split { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 8px; font-size: 14px; color: rgba(243, 232, 210, .85); }
+        .split strong { color: var(--brass); }
+        .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+        .chips .label { font-size: 13px; color: rgba(243, 232, 210, .7); margin-right: 2px; }
+        .chip {
+            padding: 4px 12px;
+            border-radius: 999px;
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            color: var(--bone);
+            background: rgba(255, 255, 255, .1);
+            border: 1px solid rgba(255, 255, 255, .28);
+            transition: background .15s;
+        }
+        .chip:hover { background: rgba(255, 255, 255, .2); }
+        .chip.on { background: var(--brass); color: var(--walnut-dark); border-color: var(--brass); font-weight: 700; }
+        .tableWrap.tall { max-height: 44vh; overflow-y: auto; margin-top: 6px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .12); }
+        .tableWrap.tall th { position: sticky; top: 0; z-index: 1; background: #3b2210; }
+        .adminTable tr.dayRow td {
+            padding: 5px 8px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--brass);
+            background: rgba(0, 0, 0, .3);
+        }
+        .adminTable td.time { white-space: nowrap; color: rgba(243, 232, 210, .7); font-size: 13px; }
+        .adminTable td.score { white-space: nowrap; font-family: Georgia, serif; font-size: 15px; }
+        .adminTable td.winner { font-weight: 700; }
+        .res { display: inline-block; min-width: 46px; padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; text-align: center; }
+        .res.win { background: #2f9e6a; }
+        .res.loss { background: #c0472f; }
+        .res.draw { background: #6d7b86; }
+        .tag { margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 11px; color: rgba(243, 232, 210, .85); border: 1px solid rgba(255, 255, 255, .3); }
+        .modalBody input.search { margin: 6px 0; padding: 8px 14px; font-size: 14px; }
 
         /* ---- waiting for the other player ---- */
         .waitCard {

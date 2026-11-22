@@ -125,6 +125,7 @@ async def broadcast_state(room):
         "current": room["current"],
         "names": room["names"],
         "over": over,
+        "last": room.get("last"),
         "result": outcome(board) if over else None,
     }
     for ws in room["players"]:
@@ -164,7 +165,7 @@ async def game_socket(ws: WebSocket):
                     room = {
                         "code": code, "board": START[:], "current": 0,
                         "players": [ws, None], "user_ids": [user["id"], None],
-                        "names": [user["username"], None], "recorded": False,
+                        "names": [user["username"], None], "recorded": False, "last": None,
                     }
                     rooms[code] = room
                     me = 0
@@ -190,6 +191,7 @@ async def game_socket(ws: WebSocket):
                     await send(ws, {"type": "error", "message": "Illegal move"})
                     continue
                 room["board"], extra = apply_move(board, me, pit)
+                room["last"] = {"player": me, "pit": int(pit)}
                 room["current"] = next_player(room["board"], me, extra)
                 await broadcast_state(room)
 
@@ -198,6 +200,7 @@ async def game_socket(ws: WebSocket):
                     remember_game(room)
                     room["board"], room["current"] = START[:], 0
                     room["recorded"] = False
+                    room["last"] = None
                     await broadcast_state(room)
     except WebSocketDisconnect:
         pass
